@@ -27,18 +27,17 @@ if uploaded_files:
     for file in uploaded_files:
         name = file.name.split('.')[0]
         try:
-            # خواندن فایل CSV با مدیریت نقل‌قول‌ها
             df = pd.read_csv(
                 file,
                 thousands=',',
-                quoting=csv.QUOTE_ALL,  # مدیریت نقل‌قول‌ها
-                quotechar='"',          # کاراکتر نقل‌قول
-                skipinitialspace=True   # حذف فاصله‌های اضافی
+                quoting=csv.QUOTE_ALL,
+                quotechar='"',
+                skipinitialspace=True
             )
 
             # پاکسازی نام ستون‌ها
-           df.columns = df.columns.str.strip().str.lower().str.replace('"', '', regex=False)
-            # نمایش ستون‌های خام برای دیباگ
+            df.columns = df.columns.str.strip().str.lower().str.replace('"', '', regex=False)
+
             st.write(f"ستون‌های فایل {name}: {list(df.columns)}")
 
             # بررسی وجود ستون‌های تاریخ و قیمت
@@ -58,27 +57,20 @@ if uploaded_files:
             # تبدیل ستون تاریخ به datetime با فرمت‌های مختلف
             df[date_col] = pd.to_datetime(df[date_col], errors='coerce', utc=True)
             if df[date_col].isna().all():
-                # امتحان فرمت‌های دیگر
                 for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%Y/%m/%d']:
                     df[date_col] = pd.to_datetime(df[date_col], format=fmt, errors='coerce', utc=True)
                     if not df[date_col].isna().all():
                         break
                 if df[date_col].isna().all():
-                    st.error(f"ستون تاریخ ({date_col}) در فایل {name} به درستی به datetime تبدیل نشد. لطفاً فرمت تاریخ رو چک کن (مثال: '2024-05-15' یا '15/05/2024').")
+                    st.error(f"ستون تاریخ ({date_col}) در فایل {name} به درستی به datetime تبدیل نشد. لطفاً فرمت تاریخ رو چک کن.")
                     continue
-
-            # تبدیل ستون قیمت به عددی
             df[price_col] = pd.to_numeric(df[price_col], errors='coerce')
-
-            # حذف ردیف‌های نامعتبر
             df.dropna(subset=[date_col, price_col], inplace=True)
-
             if df.empty:
                 st.error(f"فایل {name} پس از پردازش هیچ داده معتبری نداره.")
                 continue
-
-            # تنظیم ایندکس
             df.set_index(date_col, inplace=True)
+            # فقط ستون قیمت را به نام asset تغییر بده
             df.rename(columns={price_col: name}, inplace=True)
 
             if prices_df.empty:
@@ -95,7 +87,6 @@ if uploaded_files:
         st.error("❌ هیچ داده معتبری برای تحلیل وجود نداره.")
         st.stop()
 
-    # بررسی نوع ایندکس قبل از resample
     if not pd.api.types.is_datetime64_any_dtype(prices_df.index):
         st.error("⛔ ایندکس دیتافریم از نوع datetime نیست. لطفاً فرمت ستون‌های تاریخ رو چک کن.")
         st.stop()
@@ -154,7 +145,6 @@ if uploaded_files:
         results[2, i] = sharpe
         results[3:, i] = weights
 
-    # انتخاب پرتفو با حداکثر نسبت شارپ
     idx = np.argmax(results[2])
     best_ret, best_risk, best_sharpe = results[0, idx], results[1, idx], results[2, idx]
     best_weights = results[3:, idx]
