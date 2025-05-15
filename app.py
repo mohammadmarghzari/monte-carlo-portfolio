@@ -3,11 +3,10 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from scipy.stats import norm
 
-st.set_page_config(page_title="تحلیل پرتفو با آپشن و مونت‌کارلو + مرز کارا", layout="wide")
+st.set_page_config(page_title="تحلیل پرتفو با بیمه آپشن، مونت‌کارلو و مرز کارا", layout="wide")
 st.title("📈 تحلیل پرتفو با بیمه آپشن، مونت‌کارلو و مرز کارا")
-st.markdown("هدف: محاسبه دقیق بازده و ریسک با پوشش آپشن پوت")
+st.markdown("محاسبه دقیق سود و ریسک با محاسبه جداگانه آپشن برای هر دارایی")
 
 def read_csv_file(file):
     try:
@@ -42,6 +41,7 @@ else:
 if uploaded_files:
     prices_df = pd.DataFrame()
     asset_names = []
+    option_data = {}  # نگهداری ورودی آپشن برای هر دارایی
 
     for file in uploaded_files:
         df = read_csv_file(file)
@@ -84,55 +84,54 @@ if uploaded_files:
 
     mean_returns = returns.mean() * annual_factor
     cov_matrix = returns.cov() * annual_factor
-
     asset_std_devs = np.sqrt(np.diag(cov_matrix))
 
-    # ورودی‌های بیمه آپشن
-    st.sidebar.subheader("بیمه آپشن پوت")
+    st.sidebar.subheader("بیمه آپشن پوت (برای هر دارایی)")
     use_put_option = st.sidebar.checkbox("فعال‌سازی بیمه با آپشن پوت")
 
+    base_amounts = {}
+    base_prices = {}
+    option_contracts = {}
+    option_strikes = {}
+    option_premiums = {}
+    option_pnl_percent = {}
+
     if use_put_option:
-        insurance_percent = st.sidebar.number_input("درصد پوشش بیمه (٪ از پرتفو)", min_value=0.0, max_value=100.0, value=30.0, step=0.01)
-        option_strike_price = st.sidebar.number_input(
-            "قیمت اعمال (Strike Price) آپشن",
-            min_value=0.0,
-            value=1000.0,
-            step=0.0001,
-            format="%.6f"
-        )
-        option_premium = st.sidebar.number_input(
-            "قیمت آپشن (Premium)",
-            min_value=0.0,
-            value=50.0,
-            step=0.0001,
-            format="%.6f"
-        )
-        option_contracts = st.sidebar.number_input("تعداد قرارداد آپشن", min_value=0, value=1)
+        st.subheader("ورودی‌های آپشن برای هر دارایی")
+        total_portfolio_value = 0.0
+        # ورودی‌ها برای هر دارایی
+        for asset in asset_names:
+            st.markdown(f"### دارایی: {asset}")
+            base_amounts[asset] = st.number_input(f"مقدار دارایی پایه خریداری شده - {asset}", min_value=0.0, value=0.0, step=0.01, key=f"base_amount_{asset}")
+            base_prices[asset] = st.number_input(f"قیمت خرید دارایی پایه (دلار) - {asset}", min_value=0.0, value=1000.0, step=0.01, format="%.6f", key=f"base_price_{asset}")
+            option_contracts[asset] = st.number_input(f"تعداد قرارداد آپشن - {asset}", min_value=0, value=0, step=1, key=f"option_contracts_{asset}")
+            option_strikes[asset] = st.number_input(f"قیمت اعمال (Strike Price) آپشن - {asset}", min_value=0.0, value=1000.0, step=0.01, format="%.6f", key=f"option_strike_{asset}")
+            option_premiums[asset] = st.number_input(f"قیمت آپشن (Premium) - {asset}", min_value=0.0, value=50.0, step=0.01, format="%.6f", key=f"option_premium_{asset}")
 
-        base_amount = st.number_input("مقدار دارایی پایه (تعداد واحد)", min_value=0.0, value=1.0, step=0.01)
-        base_price_usd = st.number_input(
-            "قیمت پایه دلاری هر واحد دارایی",
-            min_value=0.0,
-            value=1000.0,
-            step=0.0001,
-            format="%.6f"
-        )
+            total_portfolio_value += base_amounts[asset] * base_prices[asset]
 
-        total_value_usd = base_amount * base_price_usd
+        # محاسبه سود/زیان آپشن‌ها و درصد کل پرتفو
+        total_option_pnl = 0.0
+        for asset in asset_names:
+            pnl = max(0, option_strikes[asset] - base_prices[asset]) * option_contracts[asset] - option_premiums[asset] * option_contracts[asset]
+            option_pnl_percent[asset] = 0.0
+            if total_portfolio_value > 0:
+                option_pnl_percent[asset] = pnl / total_portfolio_value
+            total_option_pnl += pnl
 
-        insurance_coverage_value = option_contracts * option_strike_price
-        real_coverage_percent = min(insurance_coverage_value / total_value_usd, 1.0)
+            st.write(f"سود/زیان آپشن {asset}: {pnl:.2f} دلار - درصد پرتفو: {option_pnl_percent[asset]*100:.2f}%")
 
-        st.write(f"درصد واقعی پوشش بیمه شده از پرتفو: {real_coverage_percent*100:.2f}%")
+        # درصد پوشش کل پرتفو
+        real_coverage_percent = sum(min((option_contracts[asset] * option_strikes[asset]) / (base_amounts[asset] * base_prices[asset] + 1e-10), 1.0) for asset in asset_names if base_amounts[asset]>0) / max(len(asset_names),1)
+        st.write(f"درصد تقریبی پوشش بیمه کل پرتفو: {real_coverage_percent*100:.2f}%")
 
-        total_premium_cost = option_premium * option_contracts
-        adjusted_mean_returns = mean_returns * (1 - real_coverage_percent) - total_premium_cost / total_value_usd
-        adjusted_cov = cov_matrix * (1 - real_coverage_percent) ** 2
+        # تعدیل بازده و کوواریانس
+        adjusted_mean_returns = mean_returns + np.array([option_pnl_percent.get(asset, 0) for asset in asset_names])
+        adjusted_cov = cov_matrix * (1 - real_coverage_percent)**2
 
         effective_std = asset_std_devs * (1 - real_coverage_percent)
         preference_weights = effective_std / asset_std_devs
         preference_weights /= np.sum(preference_weights)
-
     else:
         adjusted_mean_returns = mean_returns
         adjusted_cov = cov_matrix
@@ -237,32 +236,6 @@ if uploaded_files:
             name='Target Portfolio'
         ))
         st.plotly_chart(fig)
-
-    st.subheader("💰 محاسبه سود و زیان تخمینی (دلار آمریکا)")
-    total_value_usd = base_amount * base_price_usd
-
-    if analysis_mode == "مونت‌کارلو (MC)":
-        selected_return = best_return
-        selected_risk = best_risk
-        selected_weights = best_weights
-    else:
-        selected_return = r_return
-        selected_risk = r_risk
-        selected_weights = r_weights
-
-    estimated_profit_usd = total_value_usd * selected_return
-    estimated_loss_usd = total_value_usd * selected_risk
-
-    st.markdown(f"""
-    - 📈 سود تخمینی: {estimated_profit_usd:,.2f} دلار  
-    - 📉 ضرر تخمینی (انحراف معیار): {estimated_loss_usd:,.2f} دلار  
-    """)
-
-    st.markdown("### 🎯 بازده مورد انتظار سالانه:")
-    st.write(f"{selected_return:.2%}")
-
-    st.markdown("### 📊 ریسک سالانه (انحراف معیار):")
-    st.write(f"{selected_risk:.2%}")
 
 else:
     st.warning("لطفاً فایل‌های CSV شامل ستون‌های Date و Price را آپلود کنید.")
