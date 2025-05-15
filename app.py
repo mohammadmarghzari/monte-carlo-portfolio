@@ -12,11 +12,14 @@ uploaded_files = st.sidebar.file_uploader("هر دارایی یک فایل CSV �
 
 analysis_mode = st.sidebar.radio("مدل تحلیل پرتفو:", ["مونت‌کارلو (MC)", "مرز کارا (MPT)"])
 period = st.sidebar.selectbox("بازه تحلیل بازده:", ['روزانه', 'ماهانه', 'سه‌ماهه'])
-if period == 'روزانه': resample_rule, annual_factor = 'D', 252
-elif period == 'ماهانه': resample_rule, annual_factor = 'M', 12
-else: resample_rule, annual_factor = 'Q', 4
+if period == 'روزانه':
+    resample_rule, annual_factor = 'D', 252
+elif period == 'ماهانه':
+    resample_rule, annual_factor = 'M', 12
+else:
+    resample_rule, annual_factor = 'Q', 4
 
-target_risk_slider = st.sidebar.slider("🎯 ریسک هدف برای مرز کارا (٪)", 1.0, 50.0, 25.0, step=0.1) / 100
+target_risk_slider = st.sidebar.slider("🎯 ریسک هدف برای مرز کارا (%)", 1.0, 50.0, 25.0, step=0.1) / 100
 use_put_option = st.sidebar.checkbox("📉 فعال‌سازی بیمه با آپشن پوت")
 
 if uploaded_files:
@@ -27,8 +30,8 @@ if uploaded_files:
         name = file.name.split('.')[0]
         df = pd.read_csv(file)
 
-        # پاکسازی نام ستون‌ها از کوتیشن و فاصله اضافی
-        df.columns = df.columns.str.strip().str.replace('"', '')
+        # پاکسازی نام ستون‌ها (حذف دابل‌کوتیشن و فاصله اضافی)
+        df.columns = df.columns.str.strip().str.replace('"', '').str.replace("'", '')
 
         if 'Date' not in df.columns or 'Price' not in df.columns:
             st.error(f"فایل {name} باید شامل ستون‌های 'Date' و 'Price' باشد. ستون‌های یافت‌شده: {df.columns.tolist()}")
@@ -37,6 +40,7 @@ if uploaded_files:
         df = df[['Date', 'Price']].copy()
         df.dropna(subset=['Date', 'Price'], inplace=True)
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df = df.dropna(subset=['Date'])
         df.set_index('Date', inplace=True)
         df = df[['Price']]
         df.columns = [name]
