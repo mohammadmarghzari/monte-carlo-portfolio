@@ -30,15 +30,24 @@ if uploaded_files:
 
             # نگاشت ستون‌های فایل به Date و Price
             if 'timeopen' not in df.columns or 'close' not in df.columns:
-                st.error(f"فایل {name} فاقد ستون‌های 'timeOpen' و 'close' است.")
+                st.error(f"فایل {name} فاقد ستون‌های 'timeopen' و 'close' است. فایل باید شامل ستون‌های 'timeopen' و 'close' باشد.")
                 continue
 
             df = df[['timeopen', 'close']].copy()
-            df.dropna(subset=['timeopen', 'close'], inplace=True)
-            df['timeopen'] = pd.to_datetime(df['timeopen'], errors='coerce')
-            df.dropna(subset=['timeopen'], inplace=True)
-            df.set_index('timeopen', inplace=True)
-            df.rename(columns={'close': name}, inplace=True)
+            df.rename(columns={'timeopen': 'Date', 'close': 'Price'}, inplace=True)
+
+            # تبدیل ستون Date به datetime
+            df['Date'] = pd.to_datetime(df['Date'], errors='coerce', utc=True)
+            df['Price'] = pd.to_numeric(df['Price'], errors='coerce')  # اطمینان از عددی بودن ستون Price
+            df.dropna(subset=['Date', 'Price'], inplace=True)
+
+            if df.empty:
+                st.error(f"فایل {name} پس از پردازش هیچ داده معتبری ندارد.")
+                continue
+
+            df.set_index('Date', inplace=True)
+            df = df[['Price']]
+            df.rename(columns={'Price': name}, inplace=True)
 
             if prices_df.empty:
                 prices_df = df
@@ -53,17 +62,28 @@ if uploaded_files:
         st.error("❌ هیچ داده معتبری برای تحلیل وجود ندارد.")
         st.stop()
 
+    # بررسی نوع ایندکس
     if not pd.api.types.is_datetime64_any_dtype(prices_df.index):
-        st.error("⛔ ایندکس باید از نوع datetime باشد.")
+        st.error("⛔ ایندکس باید از نوع datetime باشد. لطفاً مطمئن شوید که ستون تاریخ به درستی فرمت شده است.")
         st.stop()
+
+    # تبدیل ایندکس به تاریخ بدون اطلاعات زمانی (در صورت نیاز)
+    prices_df.index = prices_df.index.date
 
     st.subheader("🧾 پیش‌نمایش داده‌های قیمت")
     st.dataframe(prices_df.tail())
 
-    prices_resampled = prices_df.resample(resample_rule).last().dropna()
-    returns = prices_resampled.pct_change().dropna()
-    mean_returns = returns.mean() * annual_factor
-    cov_matrix = returns.cov() * annual_factor
+    try:
+        prices_resampled = prices_df.resample(resample_rule).last().dropna()
+        returns = prices_resampled.pct_change().dropna()
+        if returns.empty:
+            st.error("❌ داده‌های کافی برای محاسبه بازده وجود ندارد.")
+            st.stop()
+        mean_returns = returns.mean() * annual_factor
+        cov_matrix = returns.cov() * annual_factor
+    except Exception as e:
+        st.error(f"خطا در بازنمونه‌برداری یا محاسبه بازده: {e}")
+        st.stop()
 
     option_data = {}
     if use_option:
@@ -101,7 +121,7 @@ if uploaded_files:
         sharpe = ret / risk if risk != 0 else 0
         results[0, i] = ret
         results[1, i] = risk
-        results[2, i] = sharpe
+        results[2 Inglish, i] = sharpe
         results[3:, i] = weights
 
     idx = np.argmin(np.abs(results[1] - target_risk))
@@ -143,4 +163,4 @@ if uploaded_files:
     st.info(f"درصدی: از {low:.2%} تا {high:.2%}")
     st.info(f"دلاری: از {capital * low:,.2f} تا {capital * high:,.2f}")
 else:
-    st.info("لطفاً فایل‌هایی با ستون‌های timeOpen و close بارگذاری کنید.")
+    st.info("لطفاً فایل‌هایی با ستون‌های timeopen و close بارگذاری کنید.")
