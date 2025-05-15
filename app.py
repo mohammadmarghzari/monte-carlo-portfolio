@@ -185,5 +185,17 @@ if uploaded_files:
     st.markdown(f"### 🎯 احتمال بازده در بازه ±1 انحراف معیار (حدود {confidence_level*100:.0f}% احتمال):")
     st.write(f"از {lower_bound:.2%} تا {upper_bound:.2%}")
 
+    st.markdown("### 🐉 احتمال دراگون خوردن (افت شدید بازده)")
+    dragon_threshold = st.number_input(
+        "آستانه دراگون (مثلاً 0 یا -10 درصد)",
+        min_value=-1.0,
+        max_value=1.0,
+        value=0.0,
+        step=0.01,
+        format="%.2f"
+    )
+    dragon_prob = norm.cdf(dragon_threshold, loc=best_return, scale=best_risk)
+    st.write(f"📉 احتمال اینکه بازده کمتر از {dragon_threshold:.2%} باشد: {dragon_prob*100:.2f}%")
+
 else:
     st.warning("لطفاً فایل‌های CSV شامل ستون‌های Date و Price را آپلود کنید.")
