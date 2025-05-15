@@ -37,8 +37,7 @@ if uploaded_files:
             )
 
             # پاکسازی نام ستون‌ها
-            df.columns = df.columns.str.strip().str.lower().str.replace('"', '')
-
+           df.columns = df.columns.str.strip().str.lower().str.replace('"', '', regex=False)
             # نمایش ستون‌های خام برای دیباگ
             st.write(f"ستون‌های فایل {name}: {list(df.columns)}")
 
