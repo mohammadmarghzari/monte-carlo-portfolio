@@ -9,7 +9,7 @@ st.title("📈 تحلیل پرتفو با بیمه آپشن، مونت‌کار�
 
 st.sidebar.header("📂 بارگذاری فایل‌های CSV")
 uploaded_files = st.sidebar.file_uploader(
-    "آپلود فایل‌های CSV (شامل ستون‌های Date و Price)", 
+    "آپلود فایل‌های CSV (شامل ستون‌های تاریخ و قیمت)", 
     type=["csv"], accept_multiple_files=True)
 
 period = st.sidebar.selectbox("بازه تحلیل:", ['روزانه', 'ماهانه', 'سه‌ماهه'])
@@ -25,21 +25,20 @@ if uploaded_files:
     for file in uploaded_files:
         name = file.name.split('.')[0]
         try:
-            df = pd.read_csv(file, thousands=',')
+            df = pd.read_csv(file, thousands=',', sep=';')  # جداکننده ; برای فایل CSV
             df.columns = df.columns.str.strip().str.lower()
-            df.rename(columns={'date': 'Date', 'price': 'Price'}, inplace=True)
 
-            if 'Date' not in df.columns or 'Price' not in df.columns:
-                st.error(f"فایل {name} فاقد ستون‌های 'Date' و 'Price' است.")
+            # نگاشت ستون‌های فایل به Date و Price
+            if 'timeopen' not in df.columns or 'close' not in df.columns:
+                st.error(f"فایل {name} فاقد ستون‌های 'timeOpen' و 'close' است.")
                 continue
 
-            df = df[['Date', 'Price']].copy()
-            df.dropna(subset=['Date', 'Price'], inplace=True)
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-            df.dropna(subset=['Date'], inplace=True)
-            df.set_index('Date', inplace=True)
-            df = df[['Price']]
-            df.rename(columns={'Price': name}, inplace=True)
+            df = df[['timeopen', 'close']].copy()
+            df.dropna(subset=['timeopen', 'close'], inplace=True)
+            df['timeopen'] = pd.to_datetime(df['timeopen'], errors='coerce')
+            df.dropna(subset=['timeopen'], inplace=True)
+            df.set_index('timeopen', inplace=True)
+            df.rename(columns={'close': name}, inplace=True)
 
             if prices_df.empty:
                 prices_df = df
@@ -144,4 +143,4 @@ if uploaded_files:
     st.info(f"درصدی: از {low:.2%} تا {high:.2%}")
     st.info(f"دلاری: از {capital * low:,.2f} تا {capital * high:,.2f}")
 else:
-    st.info("لطفاً فایل‌هایی با ستون‌های Date و Price بارگذاری کنید.")
+    st.info("لطفاً فایل‌هایی با ستون‌های timeOpen و close بارگذاری کنید.")
