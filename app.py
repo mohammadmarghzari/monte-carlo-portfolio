@@ -7,11 +7,9 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="تحلیل پرتفو با آپشن و مرز کارا", layout="wide")
 st.title("📈 تحلیل پرتفو با بیمه آپشن، مونت‌کارلو و مرز کارا")
 
-# آپلود فایل
 st.sidebar.header("📂 فایل‌های CSV قیمت")
 uploaded_files = st.sidebar.file_uploader("هر دارایی یک فایل CSV با ستون‌های Date و Price", type=['csv'], accept_multiple_files=True)
 
-# پارامترها
 analysis_mode = st.sidebar.radio("مدل تحلیل پرتفو:", ["مونت‌کارلو (MC)", "مرز کارا (MPT)"])
 period = st.sidebar.selectbox("بازه تحلیل بازده:", ['روزانه', 'ماهانه', 'سه‌ماهه'])
 if period == 'روزانه': resample_rule, annual_factor = 'D', 252
@@ -28,14 +26,18 @@ if uploaded_files:
     for file in uploaded_files:
         name = file.name.split('.')[0]
         df = pd.read_csv(file)
+
         if 'Date' not in df.columns or 'Price' not in df.columns:
-            st.error(f"فایل {name} باید شامل ستون‌های 'Date' و 'Price' باشد.")
+            st.error(f"فایل {name} باید شامل ستون‌های 'Date' و 'Price' باشد. ستون‌های یافت‌شده: {df.columns.tolist()}")
             continue
+
+        df = df[['Date', 'Price']].copy()
+        df.dropna(subset=['Date', 'Price'], inplace=True)
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
-        df = df[['Date', 'Price']].dropna()
         df.set_index('Date', inplace=True)
+        df = df[['Price']]
         df.columns = [name]
+
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
         asset_names.append(name)
 
@@ -56,6 +58,7 @@ if uploaded_files:
             option_contracts[asset] = st.number_input(f"تعداد قرارداد آپشن - {asset}", 0.0, 1e6, 0.0, step=0.0001, format="%.6f", key=f"contracts_{asset}")
             option_strikes[asset] = st.number_input(f"قیمت اعمال - {asset}", 0.0, 1e6, 1000.0, step=0.01, format="%.6f", key=f"strike_{asset}")
             option_premiums[asset] = st.number_input(f"قیمت آپشن - {asset}", 0.0, 1e6, 50.0, step=0.01, format="%.6f", key=f"premium_{asset}")
+
             insured_value = option_contracts[asset] * option_strikes[asset]
             base_value = base_amounts[asset] * base_prices[asset] + 1e-10
             coverage[asset] = min(insured_value / base_value, 1.0)
@@ -65,6 +68,7 @@ if uploaded_files:
             pnl = max(0, option_strikes[asset] - base_prices[asset]) * option_contracts[asset] - option_premiums[asset] * option_contracts[asset]
             pnl_percent = pnl / (base_amounts[asset] * base_prices[asset] + 1e-10)
             adj_returns[asset] += pnl_percent
+
         adj_cov = cov_matrix.copy()
         for i, a1 in enumerate(asset_names):
             for j, a2 in enumerate(asset_names):
