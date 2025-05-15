@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -17,7 +16,16 @@ if uploaded_files:
 
     for file in uploaded_files:
         df = pd.read_csv(file)
-        name = file.name.split('.')[0]  # نام دارایی از نام فایل
+        name = file.name.split('.')[0]
+
+        # نمایش ستون‌های فایل برای راهنمایی
+        st.write(f"📄 فایل: {name} - ستون‌ها: {list(df.columns)}")
+
+        # بررسی وجود ستون 'Adj Close'
+        if 'Adj Close' not in df.columns:
+            st.error(f"❌ فایل '{name}' فاقد ستون 'Adj Close' است. لطفاً فایل معتبر آپلود کنید.")
+            st.stop()
+
         asset_names.append(name)
         prices_df[name] = df['Adj Close']
 
@@ -25,7 +33,6 @@ if uploaded_files:
     mean_returns = returns.mean() * 252
     cov_matrix = returns.cov() * 252
 
-    # شبیه‌سازی مونت‌کارلو
     np.random.seed(42)
     n_portfolios = 10000
     n_assets = len(asset_names)
@@ -44,7 +51,6 @@ if uploaded_files:
         results[2, i] = sharpe_ratio
         results[3:, i] = weights
 
-    # انتخاب پرتفو با ریسک نزدیک ۳۰٪
     target_risk = 0.30
     best_idx = np.argmin(np.abs(results[1] - target_risk))
 
@@ -63,8 +69,7 @@ if uploaded_files:
     for i, name in enumerate(asset_names):
         st.markdown(f"🔹 **وزن {name}:** {best_weights[i]*100:.2f}٪")
 
-    # نمودار سود و زیان
-    st.subheader("📈 نمودار سود/زیان پورتفو نسبت به تغییر قیمت‌ها")
+    st.subheader("📈 نمودار سود/زیان پرتفو نسبت به تغییر قیمت‌ها")
 
     price_changes = np.linspace(-0.5, 0.5, 100)
     total_change = np.zeros_like(price_changes)
@@ -77,7 +82,7 @@ if uploaded_files:
     plt.axhline(0, color='black', linestyle='--')
     plt.xlabel("درصد تغییر قیمت دارایی‌ها")
     plt.ylabel("درصد سود/زیان پرتفو")
-    plt.title("نمودار سود/زیان پورتفو")
+    plt.title("نمودار سود/زیان پرتفو")
     plt.grid(True)
     st.pyplot(plt)
 
