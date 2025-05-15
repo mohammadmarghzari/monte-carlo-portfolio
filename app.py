@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import chardet
-import csv
 import io
 
 # تنظیمات صفحه
@@ -11,40 +9,13 @@ st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو"
 st.title("📈 ابزار تحلیل پرتفو با روش مونت‌کارلو")
 st.markdown("ریسک هر دارایی = ۲۰٪ | هدف: ساخت پرتفو با ریسک نزدیک به ۳۰٪")
 
-# تابع تشخیص رمزگذاری
-def detect_encoding(file):
-    try:
-        raw_data = file.read(10000)
-        result = chardet.detect(raw_data)
-        return result['encoding'] or 'utf-8'
-    except Exception as e:
-        st.error(f"خطا در تشخیص رمزگذاری: {e}")
-        return 'utf-8'
-
-# تابع تشخیص جداکننده
-def detect_delimiter(file, encoding='utf-8'):
-    try:
-        file.seek(0)
-        sample = file.readline().decode(encoding)
-        sniffer = csv.Sniffer()
-        return sniffer.sniff(sample).delimiter
-    except Exception as e:
-        st.error(f"خطا در تشخیص جداکننده: {e}")
-        return ','
-
 # تابع خواندن فایل CSV
 def read_csv_file(file):
     try:
-        encoding = detect_encoding(file)
-        st.info(f"رمزگذاری فایل {file.name}: {encoding}")
-        delimiter = detect_delimiter(file, encoding)
-        st.info(f"جداکننده فایل: {delimiter}")
-        
-        file.seek(0)
         df = pd.read_csv(
             file,
-            encoding=encoding,
-            sep=delimiter,
+            encoding='utf-8',
+            sep=',',  # فرض جداکننده کاما
             decimal='.',
             thousands=None,
             na_values=['', 'NA', 'N/A', 'null'],
@@ -52,6 +23,9 @@ def read_csv_file(file):
             on_bad_lines='warn'
         )
         return df
+    except UnicodeDecodeError:
+        st.error(f"خطا در رمزگذاری فایل {file.name}. لطفاً فایل را با رمزگذاری UTF-8 ذخیره کنید.")
+        return None
     except Exception as e:
         st.error(f"خطا در خواندن فایل {file.name}: {e}")
         return None
@@ -70,7 +44,7 @@ def find_price_column(df, file_name):
 # سایدبار برای آپلود فایل‌ها
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
-    "چند Ascending چند فایل CSV آپلود کنید (هر دارایی یک فایل)",
+    "چند فایل CSV آپلود کنید (هر دارایی یک فایل)",
     type=['csv'],
     accept_multiple_files=True
 )
@@ -138,61 +112,3 @@ if uploaded_files:
     cov_matrix = returns.cov() * 252
 
     # شبیه‌سازی مونت‌کارلو
-    np.random.seed(42)
-    n_portfolios = 10000
-    n_assets = len(asset_names)
-    results = np.zeros((3 + n_assets, n_portfolios))
-
-    for i in range(n_portfolios):
-        weights = np.random.random(n_assets)
-        weights /= np.sum(weights)
-
-        port_return = np.dot(weights, mean_returns)
-        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-        sharpe_ratio = port_return / port_std
-
-        results[0, i] = port_return
-        results[1, i] = port_std
-        results[2, i] = sharpe_ratio
-        results[3:, i] = weights
-
-    # انتخاب پرتفو با ریسک نزدیک به ۳۰٪
-    target_risk = 0.30
-    best_idx = np.argmin(np.abs(results[1] - target_risk))
-
-    best_return = results[0, best_idx]
-    best_risk = results[1, best_idx]
-    best_sharpe = results[2, best_idx]
-    best_weights = results[3:, best_idx]
-
-    # نمایش نتایج
-    st.subheader("📊 نتایج پرتفو پیشنهادی")
-    st.markdown(f"""
-    - ✅ **بازده مورد انتظار سالانه:** {best_return:.2%}  
-    - ⚠️ **ریسک سالانه:** {best_risk:.2%}  
-    - 🧠 **نسبت شارپ:** {best_sharpe:.2f}  
-    """)
-
-    for i, name in enumerate(asset_names):
-        st.markdown(f"🔹 **وزن {name}:** {best_weights[i]*100:.2f}٪")
-
-    # نمودار سود/زیان
-    st.subheader("📈 نمودار سود/زیان پرتفو نسبت به تغییر قیمت‌ها")
-    price_changes = np.linspace(-0.5, 0.5, 100)
-    total_change = np.zeros_like(price_changes)
-
-    for i, w in enumerate(best_weights):
-        total_change += w * price_changes
-
-    plt.figure(figsize=(8, 4))
-    plt.plot(price_changes * 100, total_change * 100, label="تغییر ارزش پرتفو")
-    plt.axhline(0, color='black', linestyle='--')
-    plt.xlabel("درصد تغییر قیمت دارایی‌ها")
-    plt.ylabel("درصد سود/زیان پرتفو")
-    plt.title("نمودار سود/زیان پرتفو")
-    plt.grid(True)
-    plt.legend()
-    st.pyplot(plt)
-
-else:
-    st.warning("لطفاً چند فایل CSV قیمت دارایی‌ها آپلود کنید.")
