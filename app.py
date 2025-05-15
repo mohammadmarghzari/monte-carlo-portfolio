@@ -18,16 +18,18 @@ if uploaded_files:
         df = pd.read_csv(file)
         name = file.name.split('.')[0]
 
-        # نمایش ستون‌های فایل برای راهنمایی
         st.write(f"📄 فایل: {name} - ستون‌ها: {list(df.columns)}")
 
-        # بررسی وجود ستون 'Adj Close'
-        if 'Adj Close' not in df.columns:
-            st.error(f"❌ فایل '{name}' فاقد ستون 'Adj Close' است. لطفاً فایل معتبر آپلود کنید.")
+        # جستجوی ستونی که شامل 'close' باشه
+        possible_close_cols = [col for col in df.columns if 'close' in col.lower()]
+        if not possible_close_cols:
+            st.error(f"❌ فایل '{name}' فاقد ستونی مشابه قیمت پایانی (مثل 'Close' یا 'Adj Close') است.")
             st.stop()
 
+        close_col = possible_close_cols[0]
+        st.success(f"✅ ستون انتخاب‌شده برای {name}: {close_col}")
         asset_names.append(name)
-        prices_df[name] = df['Adj Close']
+        prices_df[name] = df[close_col]
 
     returns = prices_df.pct_change().dropna()
     mean_returns = returns.mean() * 252
