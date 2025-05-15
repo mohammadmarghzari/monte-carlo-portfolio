@@ -33,27 +33,30 @@ if uploaded_files:
         # پاکسازی نام ستون‌ها از کوتیشن و فاصله اضافی
         df.columns = df.columns.str.strip().str.replace('"', '').str.replace("'", '')
 
-        st.write(f"File: {name}")
-        st.write(f"Columns before filtering: {df.columns.tolist()}")
-        st.write(f"Number of columns before filtering: {df.shape[1]}")
-
         if 'Date' not in df.columns or 'Price' not in df.columns:
             st.error(f"فایل {name} باید شامل ستون‌های 'Date' و 'Price' باشد. ستون‌های یافت‌شده: {df.columns.tolist()}")
             continue
 
+        # فقط ستون‌های Date و Price را انتخاب کن
         df = df.loc[:, ['Date', 'Price']].copy()
-        df.dropna(subset=['Date', 'Price'], inplace=True)
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df = df.dropna(subset=['Date'])
-        df.set_index('Date', inplace=True)
 
-        st.write(f"Columns after filtering: {df.columns.tolist()}")
-        st.write(f"Number of columns after filtering: {df.shape[1]}")
+        # حذف ردیف‌هایی که مقدار خالی در Date یا Price دارند
+        df.dropna(subset=['Date', 'Price'], inplace=True)
+
+        # تبدیل Date به datetime
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+
+        # حذف ردیف‌هایی که تاریخ نامعتبر دارند
+        df = df.dropna(subset=['Date'])
+
+        # تنظیم Date به ایندکس
+        df.set_index('Date', inplace=True)
 
         if df.shape[1] != 1:
             st.error(f"خطا: تعداد ستون‌های باقی‌مانده برای {name} بیشتر از ۱ است.")
             continue
 
+        # تغییر نام ستون به نام دارایی
         df.columns = [name]
 
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
