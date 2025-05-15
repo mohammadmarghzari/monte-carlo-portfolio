@@ -25,32 +25,38 @@ if uploaded_files:
     for file in uploaded_files:
         name = file.name.split('.')[0]
         try:
-            # خواندن فایل CSV و شناسایی ستون‌ها
-            df = pd.read_csv(file, thousands=',', sep=';')  # جداکننده ; برای فایل CSV
+            # خواندن فایل CSV
+            df = pd.read_csv(file, thousands=',')
             df.columns = df.columns.str.strip().str.lower()
 
-            # بررسی وجود ستون‌های مورد نیاز
-            required_columns = ['timeopen', 'close']
-            if not all(col in df.columns for col in required_columns):
-                st.error(f"فایل {name} باید شامل ستون‌های 'timeopen' و 'close' باشد. ستون‌های موجود: {list(df.columns)}")
+            # شناسایی ستون‌های تاریخ و قیمت
+            date_col = None
+            price_col = None
+            if 'date' in df.columns and 'price' in df.columns:
+                date_col, price_col = 'date', 'price'
+            elif 'timeopen' in df.columns and 'close' in df.columns:
+                date_col, price_col = 'timeopen', 'close'
+            else:
+                st.error(f"فایل {name} باید شامل ستون‌های 'date' و 'price' یا 'timeopen' و 'close' باشد. ستون‌های موجود: {list(df.columns)}")
                 continue
 
-            # انتخاب و نگاشت ستون‌های مورد نیاز
-            df = df[['timeopen', 'close']].copy()
-            df.rename(columns={'timeopen': 'Date', 'close': name}, inplace=True)
+            # انتخاب ستون‌های مورد نیاز
+            df = df[[date_col, price_col]].copy()
 
-            # تبدیل ستون Date به datetime
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce', utc=True)
-            df[name] = pd.to_numeric(df[name], errors='coerce')  # اطمینان از عددی بودن ستون قیمت
-            df.dropna(subset=['Date', name], inplace=True)
+            # تبدیل ستون تاریخ به datetime
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce', utc=True)
+            # تبدیل ستون قیمت به عددی
+            df[price_col] = pd.to_numeric(df[price_col], errors='coerce')
+            # حذف ردیف‌های نامعتبر
+            df.dropna(subset=[date_col, price_col], inplace=True)
 
             if df.empty:
                 st.error(f"فایل {name} پس از پردازش هیچ داده معتبری ندارد.")
                 continue
 
-            # تنظیم ایندکس
-            df.set_index('Date', inplace=True)
-            df = df[[name]]  # فقط ستون قیمت (با نام دارایی) نگه داشته شود
+            # تنظیم ایندکس و تغییر نام ستون قیمت
+            df.set_index(date_col, inplace=True)
+            df.rename(columns={price_col: name}, inplace=True)
 
             if prices_df.empty:
                 prices_df = df
@@ -163,4 +169,4 @@ if uploaded_files:
     st.info(f"درصدی: از {low:.2%} تا {high:.2%}")
     st.info(f"دلاری: از {capital * low:,.2f} تا {capital * high:,.2f}")
 else:
-    st.info("لطفاً فایل‌هایی با ستون‌های timeopen و close بارگذاری کنید.")
+    st.info("لطفاً فایل‌هایی با ستون‌های 'date' و 'price' یا 'timeopen' و 'close' بارگذاری کنید.")
