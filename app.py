@@ -3,9 +3,10 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from scipy.stats import norm
 
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو", layout="wide")
-st.title("\U0001F4C8 ابزار تحلیل پرتفو با روش مونت‌کارلو")
+st.title("📈 ابزار تحلیل پرتفو با روش مونت‌کارلو")
 st.markdown("هدف: ساخت پرتفو با بازده بالا و ریسک کنترل‌شده")
 
 def read_csv_file(file):
@@ -18,7 +19,7 @@ def read_csv_file(file):
         st.error(f"خطا در خواندن فایل {file.name}: {e}")
         return None
 
-st.sidebar.header("\U0001F4C2 بارگذاری فایل دارایی‌ها (CSV)")
+st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV آپلود کنید (هر دارایی یک فایل)",
     type=['csv'],
@@ -69,23 +70,33 @@ if uploaded_files:
         st.error("❌ داده‌ی معتبری برای تحلیل یافت نشد.")
         st.stop()
 
-    st.subheader("\U0001F9EA پیش‌نمایش داده‌ها")
+    st.subheader("🧪 پیش‌نمایش داده‌ها (آخرین قیمت‌های هر فایل)")
     st.dataframe(prices_df.tail())
 
     resampled_prices = prices_df.resample(resample_rule).last()
-    resampled_prices = resampled_prices.apply(pd.to_numeric, errors='coerce').dropna()
+    resampled_prices = resampled_prices.apply(pd.to_numeric, errors='coerce')
+    resampled_prices = resampled_prices.dropna()
+
+    if resampled_prices.empty:
+        st.error("❌ داده‌ها پس از بازنمونه‌گیری (resample) خالی شدند.")
+        st.stop()
+
     returns = resampled_prices.pct_change().dropna()
+
     if returns.empty:
-        st.error("❌ محاسبه بازده ممکن نیست.")
+        st.error("❌ محاسبه بازده ممکن نیست. لطفاً فایل‌ها را بررسی کنید.")
         st.stop()
 
     mean_returns = returns.mean() * annual_factor
     cov_matrix = returns.cov() * annual_factor
+
     asset_std_devs = np.sqrt(np.diag(cov_matrix))
 
     use_put_option = st.checkbox("فعال‌سازی بیمه با آپشن پوت")
     if use_put_option:
-        insurance_percent = st.number_input("درصد پوشش بیمه (٪)", 0.0, 100.0, 30.0, step=1.0)
+        insurance_percent = st.number_input(
+            "درصد پوشش بیمه (٪ از پرتفو)", min_value=0.0, max_value=100.0, value=30.0
+        )
         effective_std = asset_std_devs * (1 - insurance_percent / 100)
         preference_weights = asset_std_devs / effective_std
         adjusted_cov = cov_matrix * (1 - insurance_percent / 100)**2
@@ -119,7 +130,7 @@ if uploaded_files:
     best_sharpe = results[2, best_idx]
     best_weights = results[3:, best_idx]
 
-    st.subheader("\U0001F4CA نتایج پرتفو پیشنهادی (سالانه)")
+    st.subheader("📊 نتایج پرتفو پیشنهادی (سالانه)")
     st.markdown(f"""
     - ✅ **بازده مورد انتظار سالانه:** {best_return:.2%}  
     - ⚠️ **ریسک سالانه (انحراف معیار):** {best_risk:.2%}  
@@ -128,7 +139,7 @@ if uploaded_files:
     for i, name in enumerate(asset_names):
         st.markdown(f"🔹 **وزن {name}:** {best_weights[i]*100:.2f}%")
 
-    st.subheader("\U0001F4C8 Portfolio Risk/Return Scatter Plot")
+    st.subheader("📈 Portfolio Risk/Return Scatter Plot (Interactive)")
     fig = px.scatter(
         x=results[1]*100,
         y=results[0]*100,
@@ -146,16 +157,27 @@ if uploaded_files:
     ))
     st.plotly_chart(fig)
 
-    # ✅ محاسبه سود و زیان تخمینی
-    st.subheader("\U0001F4B0 سود و زیان تخمینی")
-    base_amount = st.number_input("مقدار دارایی پایه (تومان یا دلار)", min_value=0.0, value=1000000.0, step=10000.0)
+    st.subheader("💰 محاسبه سود و زیان تخمینی (دلار آمریکا)")
+    base_amount = st.number_input("مقدار دارایی پایه (تعداد واحد)", min_value=0.0, value=1.0, step=0.01)
+    base_price_usd = st.number_input("قیمت پایه دلاری هر واحد دارایی", min_value=0.0, value=1000.0, step=0.01)
 
-    estimated_profit = base_amount * best_return
-    estimated_loss = -base_amount * best_risk
+    total_value_usd = base_amount * base_price_usd
+    estimated_profit_usd = total_value_usd * best_return
+    estimated_loss_usd = total_value_usd * best_risk
 
     st.markdown(f"""
-    - 📈 **سود تخمینی:** {estimated_profit:,.0f}
-    - 📉 **ضرر تخمینی:** {estimated_loss:,.0f}
+    - 📈 **سود تخمینی:** {estimated_profit_usd:,.2f} دلار  
+    - 📉 **ضرر تخمینی:** {estimated_loss_usd:,.2f} دلار  
+    """)
+
+    confidence_level = 0.68
+    z_score = norm.ppf((1 + confidence_level) / 2)
+    lower_bound = best_return - z_score * best_risk
+    upper_bound = best_return + z_score * best_risk
+
+    st.markdown(f"""
+    - 🎯 **احتمال بازده در بازه ±1 انحراف معیار ({confidence_level*100:.0f}%):**  
+      از {lower_bound:.2%} تا {upper_bound:.2%}
     """)
 
 else:
