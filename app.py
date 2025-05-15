@@ -66,6 +66,14 @@ if uploaded_files:
     asset_names = []
     date_column = None
 
+    # امکان انتخاب فرمت تاریخ توسط کاربر
+    st.sidebar.header("⚙️ تنظیمات فرمت تاریخ")
+    date_format = st.sidebar.text_input(
+        "فرمت تاریخ (مثل %m/%d/%Y برای 03/08/2025)",
+        value="%m/%d/%Y",
+        help="از فرمت‌های strftime استفاده کنید (مثل %Y-%m-%d برای 2025-08-03)"
+    )
+
     # پردازش فایل‌های آپلودشده
     for file in uploaded_files:
         df = read_csv_file(file)
@@ -87,8 +95,7 @@ if uploaded_files:
         
         # تبدیل تاریخ
         try:
-            # فرمت تاریخ نمونه: '03/08/2025' (MM/DD/YYYY)
-            df[date_col] = pd.to_datetime(df[date_col], errors='coerce', format='%m/%d/%Y')
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce', format=date_format)
             invalid_dates = df[df[date_col].isna()]
             if not invalid_dates.empty:
                 st.warning(f"⚠️ {len(invalid_dates)} مقدار تاریخ نامعتبر در فایل '{name}' یافت شد:")
