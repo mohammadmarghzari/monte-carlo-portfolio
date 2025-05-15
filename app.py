@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو", layout="wide")
-st.title("📈 ابزار تحلیل پرتفو با روش مونت‌کارلو")
+st.title("\U0001F4C8 ابزار تحلیل پرتفو با روش مونت‌کارلو")
 st.markdown("هدف: ساخت پرتفو با بازده بالا و ریسک کنترل‌شده")
 
 def read_csv_file(file):
@@ -18,7 +18,7 @@ def read_csv_file(file):
         st.error(f"خطا در خواندن فایل {file.name}: {e}")
         return None
 
-st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
+st.sidebar.header("\U0001F4C2 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV آپلود کنید (هر دارایی یک فایل)",
     type=['csv'],
@@ -69,43 +69,32 @@ if uploaded_files:
         st.error("❌ داده‌ی معتبری برای تحلیل یافت نشد.")
         st.stop()
 
-    st.subheader("🧪 پیش‌نمایش داده‌ها (آخرین قیمت‌های هر فایل)")
+    st.subheader("\U0001F9EA پیش‌نمایش داده‌ها")
     st.dataframe(prices_df.tail())
 
     resampled_prices = prices_df.resample(resample_rule).last()
-    resampled_prices = resampled_prices.apply(pd.to_numeric, errors='coerce')
-    resampled_prices = resampled_prices.dropna()
-
-    if resampled_prices.empty:
-        st.error("❌ داده‌ها پس از بازنمونه‌گیری (resample) خالی شدند.")
-        st.stop()
-
+    resampled_prices = resampled_prices.apply(pd.to_numeric, errors='coerce').dropna()
     returns = resampled_prices.pct_change().dropna()
-
     if returns.empty:
-        st.error("❌ محاسبه بازده ممکن نیست. لطفاً فایل‌ها را بررسی کنید.")
+        st.error("❌ محاسبه بازده ممکن نیست.")
         st.stop()
 
     mean_returns = returns.mean() * annual_factor
     cov_matrix = returns.cov() * annual_factor
-
-    # انحراف معیار سالانه برای هر دارایی
     asset_std_devs = np.sqrt(np.diag(cov_matrix))
 
-    # 📌 تنظیم وزن ترجیحی دارایی‌ها بر اساس وضعیت بیمه
     use_put_option = st.checkbox("فعال‌سازی بیمه با آپشن پوت")
     if use_put_option:
-        insurance_percent = st.number_input(
-            "درصد پوشش بیمه (٪ از پرتفو)", min_value=0.0, max_value=100.0, value=30.0
-        )
-        effective_risk = asset_std_devs * (1 - insurance_percent / 100)
-        preference_weights = asset_std_devs / effective_risk
+        insurance_percent = st.number_input("درصد پوشش بیمه (٪)", 0.0, 100.0, 30.0, step=1.0)
+        effective_std = asset_std_devs * (1 - insurance_percent / 100)
+        preference_weights = asset_std_devs / effective_std
+        adjusted_cov = cov_matrix * (1 - insurance_percent / 100)**2
     else:
         preference_weights = 1 / asset_std_devs
+        adjusted_cov = cov_matrix
 
     preference_weights = preference_weights / np.sum(preference_weights)
 
-    # شبیه‌سازی مونت‌کارلو
     np.random.seed(42)
     n_portfolios = 10000
     n_assets = len(asset_names)
@@ -116,7 +105,7 @@ if uploaded_files:
         weights = random_factors * preference_weights
         weights /= np.sum(weights)
         port_return = np.dot(weights, mean_returns)
-        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        port_std = np.sqrt(np.dot(weights.T, np.dot(adjusted_cov, weights)))
         sharpe_ratio = port_return / port_std
         results[0, i] = port_return
         results[1, i] = port_std
@@ -130,7 +119,7 @@ if uploaded_files:
     best_sharpe = results[2, best_idx]
     best_weights = results[3:, best_idx]
 
-    st.subheader("📊 نتایج پرتفو پیشنهادی (سالانه)")
+    st.subheader("\U0001F4CA نتایج پرتفو پیشنهادی (سالانه)")
     st.markdown(f"""
     - ✅ **بازده مورد انتظار سالانه:** {best_return:.2%}  
     - ⚠️ **ریسک سالانه (انحراف معیار):** {best_risk:.2%}  
@@ -139,7 +128,7 @@ if uploaded_files:
     for i, name in enumerate(asset_names):
         st.markdown(f"🔹 **وزن {name}:** {best_weights[i]*100:.2f}%")
 
-    st.subheader("📈 Portfolio Risk/Return Scatter Plot (Interactive)")
+    st.subheader("\U0001F4C8 Portfolio Risk/Return Scatter Plot")
     fig = px.scatter(
         x=results[1]*100,
         y=results[0]*100,
@@ -156,6 +145,18 @@ if uploaded_files:
         name='Optimal Portfolio'
     ))
     st.plotly_chart(fig)
+
+    # ✅ محاسبه سود و زیان تخمینی
+    st.subheader("\U0001F4B0 سود و زیان تخمینی")
+    base_amount = st.number_input("مقدار دارایی پایه (تومان یا دلار)", min_value=0.0, value=1000000.0, step=10000.0)
+
+    estimated_profit = base_amount * best_return
+    estimated_loss = -base_amount * best_risk
+
+    st.markdown(f"""
+    - 📈 **سود تخمینی:** {estimated_profit:,.0f}
+    - 📉 **ضرر تخمینی:** {estimated_loss:,.0f}
+    """)
 
 else:
     st.warning("لطفاً فایل‌های CSV شامل ستون‌های Date و Price را آپلود کنید.")
