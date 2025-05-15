@@ -41,7 +41,6 @@ else:
 if uploaded_files:
     prices_df = pd.DataFrame()
     asset_names = []
-    option_data = {}  # نگهداری ورودی آپشن برای هر دارایی
 
     for file in uploaded_files:
         df = read_csv_file(file)
@@ -99,14 +98,29 @@ if uploaded_files:
     if use_put_option:
         st.subheader("ورودی‌های آپشن برای هر دارایی")
         total_portfolio_value = 0.0
-        # ورودی‌ها برای هر دارایی
+        # ورودی‌ها برای هر دارایی با کلیدهای یکتا
         for asset in asset_names:
             st.markdown(f"### دارایی: {asset}")
-            base_amounts[asset] = st.number_input(f"مقدار دارایی پایه خریداری شده - {asset}", min_value=0.0, value=0.0, step=0.01, key=f"base_amount_{asset}")
-            base_prices[asset] = st.number_input(f"قیمت خرید دارایی پایه (دلار) - {asset}", min_value=0.0, value=1000.0, step=0.01, format="%.6f", key=f"base_price_{asset}")
-            option_contracts[asset] = st.number_input(f"تعداد قرارداد آپشن - {asset}", min_value=0, value=0, step=1, key=f"option_contracts_{asset}")
-            option_strikes[asset] = st.number_input(f"قیمت اعمال (Strike Price) آپشن - {asset}", min_value=0.0, value=1000.0, step=0.01, format="%.6f", key=f"option_strike_{asset}")
-            option_premiums[asset] = st.number_input(f"قیمت آپشن (Premium) - {asset}", min_value=0.0, value=50.0, step=0.01, format="%.6f", key=f"option_premium_{asset}")
+            base_amounts[asset] = st.number_input(
+                f"مقدار دارایی پایه خریداری شده - {asset}",
+                min_value=0.0, value=0.0, step=0.01, key=f"base_amount_{asset}"
+            )
+            base_prices[asset] = st.number_input(
+                f"قیمت خرید دارایی پایه (دلار) - {asset}",
+                min_value=0.0, value=1000.0, step=0.01, format="%.6f", key=f"base_price_{asset}"
+            )
+            option_contracts[asset] = st.number_input(
+                f"تعداد قرارداد آپشن - {asset}",
+                min_value=0, value=0, step=1, key=f"option_contracts_{asset}"
+            )
+            option_strikes[asset] = st.number_input(
+                f"قیمت اعمال (Strike Price) آپشن - {asset}",
+                min_value=0.0, value=1000.0, step=0.01, format="%.6f", key=f"option_strike_{asset}"
+            )
+            option_premiums[asset] = st.number_input(
+                f"قیمت آپشن (Premium) - {asset}",
+                min_value=0.0, value=50.0, step=0.01, format="%.6f", key=f"option_premium_{asset}"
+            )
 
             total_portfolio_value += base_amounts[asset] * base_prices[asset]
 
@@ -121,8 +135,11 @@ if uploaded_files:
 
             st.write(f"سود/زیان آپشن {asset}: {pnl:.2f} دلار - درصد پرتفو: {option_pnl_percent[asset]*100:.2f}%")
 
-        # درصد پوشش کل پرتفو
-        real_coverage_percent = sum(min((option_contracts[asset] * option_strikes[asset]) / (base_amounts[asset] * base_prices[asset] + 1e-10), 1.0) for asset in asset_names if base_amounts[asset]>0) / max(len(asset_names),1)
+        # درصد تقریبی پوشش بیمه کل پرتفو
+        real_coverage_percent = sum(
+            min((option_contracts[asset] * option_strikes[asset]) / (base_amounts[asset] * base_prices[asset] + 1e-10), 1.0)
+            for asset in asset_names if base_amounts[asset] > 0
+        ) / max(len(asset_names), 1)
         st.write(f"درصد تقریبی پوشش بیمه کل پرتفو: {real_coverage_percent*100:.2f}%")
 
         # تعدیل بازده و کوواریانس
@@ -132,6 +149,7 @@ if uploaded_files:
         effective_std = asset_std_devs * (1 - real_coverage_percent)
         preference_weights = effective_std / asset_std_devs
         preference_weights /= np.sum(preference_weights)
+
     else:
         adjusted_mean_returns = mean_returns
         adjusted_cov = cov_matrix
