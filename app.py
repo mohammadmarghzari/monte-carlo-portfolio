@@ -20,21 +20,34 @@ if uploaded_files:
 
         st.write(f"📄 فایل: {name} - ستون‌ها: {list(df.columns)}")
 
-        # جستجوی ستونی که شامل 'close' باشه
-        possible_close_cols = [col for col in df.columns if 'close' in col.lower()]
+        # تشخیص ستون قیمت پایانی: 'close' یا 'price'
+        possible_close_cols = [
+            col for col in df.columns 
+            if any(key in col.lower() for key in ['close', 'adj close', 'price'])
+        ]
+
         if not possible_close_cols:
-            st.error(f"❌ فایل '{name}' فاقد ستونی مشابه قیمت پایانی (مثل 'Close' یا 'Adj Close') است.")
+            st.error(f"❌ فایل '{name}' فاقد ستونی مشابه قیمت پایانی (مثل 'Price' یا 'Close') است.")
             st.stop()
 
         close_col = possible_close_cols[0]
+        df[close_col] = pd.to_numeric(df[close_col], errors='coerce')
+        df = df.dropna(subset=[close_col])
+
         st.success(f"✅ ستون انتخاب‌شده برای {name}: {close_col}")
         asset_names.append(name)
-        prices_df[name] = df[close_col]
+        prices_df[name] = df[close_col].reset_index(drop=True)
 
+    # هماهنگ کردن طول داده‌ها
+    min_len = min(len(col) for _, col in prices_df.items())
+    prices_df = prices_df.iloc[:min_len]
+
+    # محاسبه بازده روزانه و سالانه
     returns = prices_df.pct_change().dropna()
     mean_returns = returns.mean() * 252
     cov_matrix = returns.cov() * 252
 
+    # مونت‌کارلو
     np.random.seed(42)
     n_portfolios = 10000
     n_assets = len(asset_names)
@@ -53,6 +66,7 @@ if uploaded_files:
         results[2, i] = sharpe_ratio
         results[3:, i] = weights
 
+    # انتخاب پرتفو با ریسک نزدیک به ۳۰٪
     target_risk = 0.30
     best_idx = np.argmin(np.abs(results[1] - target_risk))
 
