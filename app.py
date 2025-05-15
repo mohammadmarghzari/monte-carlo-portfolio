@@ -92,36 +92,43 @@ if uploaded_files:
     use_put_option = st.sidebar.checkbox("فعال‌سازی بیمه با آپشن پوت")
 
     if use_put_option:
-        insurance_percent = st.sidebar.number_input("درصد پوشش بیمه (٪ از پرتفو)", min_value=0.0, max_value=100.0, value=30.0)
-        option_strike_price = st.sidebar.number_input("قیمت اعمال (Strike Price) آپشن", min_value=0.0, value=1000.0)
-        option_premium = st.sidebar.number_input("قیمت آپشن (Premium)", min_value=0.0, value=50.0)
+        insurance_percent = st.sidebar.number_input("درصد پوشش بیمه (٪ از پرتفو)", min_value=0.0, max_value=100.0, value=30.0, step=0.01)
+        option_strike_price = st.sidebar.number_input(
+            "قیمت اعمال (Strike Price) آپشن",
+            min_value=0.0,
+            value=1000.0,
+            step=0.0001,
+            format="%.6f"
+        )
+        option_premium = st.sidebar.number_input(
+            "قیمت آپشن (Premium)",
+            min_value=0.0,
+            value=50.0,
+            step=0.0001,
+            format="%.6f"
+        )
         option_contracts = st.sidebar.number_input("تعداد قرارداد آپشن", min_value=0, value=1)
 
-        # ورودی دارایی پایه برای محاسبه پوشش واقعی
         base_amount = st.number_input("مقدار دارایی پایه (تعداد واحد)", min_value=0.0, value=1.0, step=0.01)
-        base_price_usd = st.number_input("قیمت پایه دلاری هر واحد دارایی", min_value=0.0, value=1000.0, step=0.01)
+        base_price_usd = st.number_input(
+            "قیمت پایه دلاری هر واحد دارایی",
+            min_value=0.0,
+            value=1000.0,
+            step=0.0001,
+            format="%.6f"
+        )
 
         total_value_usd = base_amount * base_price_usd
 
-        # محاسبه پوشش پوشش بیمه بر اساس قیمت اعمال و تعداد قرارداد آپشن
-        # فرض: هر قرارداد آپشن معادل ۱ واحد دارایی پایه (اگر لازم بود عددش رو تنظیم کن)
         insurance_coverage_value = option_contracts * option_strike_price
-
-        # درصد پوشش واقعی روی کل پرتفوی
         real_coverage_percent = min(insurance_coverage_value / total_value_usd, 1.0)
 
         st.write(f"درصد واقعی پوشش بیمه شده از پرتفو: {real_coverage_percent*100:.2f}%")
 
-        # هزینه کل بیمه (Premium * تعداد قرارداد)
         total_premium_cost = option_premium * option_contracts
-
-        # کاهش بازده پرتفوی بخاطر هزینه بیمه
         adjusted_mean_returns = mean_returns * (1 - real_coverage_percent) - total_premium_cost / total_value_usd
-
-        # کاهش کوواریانس (ریسک) به دلیل بیمه آپشن (کاهش ریسک به میزان پوشش واقعی)
         adjusted_cov = cov_matrix * (1 - real_coverage_percent) ** 2
 
-        # وزن‌دهی ترجیحی: وقتی بیمه هست، وزن دارایی‌های ریسک بالاتر بیشتر می‌شود
         effective_std = asset_std_devs * (1 - real_coverage_percent)
         preference_weights = effective_std / asset_std_devs
         preference_weights /= np.sum(preference_weights)
@@ -234,7 +241,6 @@ if uploaded_files:
     st.subheader("💰 محاسبه سود و زیان تخمینی (دلار آمریکا)")
     total_value_usd = base_amount * base_price_usd
 
-    # انتخاب بازده و ریسک مطابق روش تحلیل
     if analysis_mode == "مونت‌کارلو (MC)":
         selected_return = best_return
         selected_risk = best_risk
