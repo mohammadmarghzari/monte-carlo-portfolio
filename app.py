@@ -1,13 +1,14 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import plotly.express as px
+import plotly.graph_objects as go
 import io
 
 # تنظیمات صفحه
-st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو (ماهانه)", layout="wide")
-st.title("📈 ابزار تحلیل پرتفو با روش مونت‌کارلو (ماهانه)")
-st.markdown("ریسک هر دارایی = ۲۰٪ سالانه | هدف: ساخت پرتفو با ریسک ماهانه نزدیک به ۸.۶۶٪")
+st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو (سالانه)", layout="wide")
+st.title("📈 ابزار تحلیل پرتفو با روش مونت‌کارلو (سالانه)")
+st.markdown("ریسک هر دارایی = ۲۰٪ سالانه | هدف: ساخت پرتفو با ریسک سالانه نزدیک به ۳۰٪")
 
 # تابع خواندن فایل CSV
 def read_csv_file(file):
@@ -18,7 +19,7 @@ def read_csv_file(file):
             sep=',',
             decimal='.',
             thousands=None,
-            na_values=['', 'NA', 'N/A', 'null', '-'],
+            na_values=['', 'NA', 'N/A', 'null', '-', 'NaN'],
             skipinitialspace=True,
             on_bad_lines='warn'
         )
@@ -84,9 +85,8 @@ if uploaded_files:
                 key=f"date_col_{name}"
             )
         
-        # تبدیل تاریخ با فرمت مشخص
+        # تبدیل تاریخ
         try:
-            # فرمت تاریخ نمونه: '03/08/2025' (MM/DD/YYYY)
             df[date_col] = pd.to_datetime(df[date_col], errors='coerce', format='%m/%d/%Y')
             invalid_dates = df[df[date_col].isna()]
             if not invalid_dates.empty:
@@ -113,7 +113,6 @@ if uploaded_files:
             )
         
         # پاکسازی داده‌های قیمت
-        # حذف کاما و تبدیل به عددی
         df[close_col] = df[close_col].astype(str).str.replace(',', '', regex=False)
         df[close_col] = pd.to_numeric(df[close_col], errors='coerce')
         invalid_prices = df[df[close_col].isna()]
@@ -146,17 +145,11 @@ if uploaded_files:
         st.error("❌ هیچ داده معتبری از فایل‌ها استخراج نشد. لطفاً فایل‌ها و ستون‌ها را بررسی کنید.")
         st.stop()
 
-    # محاسبه بازده ماهانه
+    # محاسبه بازده و کوواریانس سالانه
     prices_df.index = pd.to_datetime(prices_df.index)
-    monthly_prices = prices_df.resample('ME').last()  # آخرین قیمت هر ماه
-    returns = monthly_prices.pct_change().dropna()  # بازده ماهانه
-    mean_returns = returns.mean() * 12  # بازده مورد انتظار سالانه
-    cov_matrix = returns.cov() * 12  # کوواریانس سالانه
-
-    # تبدیل به مقادیر ماهانه
-    mean_returns_monthly = mean_returns / 12  # بازده ماهانه
-    cov_matrix_monthly = cov_matrix / 12  # کوواریانس ماهانه
-    risk_scaling = np.sqrt(12)  # برای تبدیل ریسک سالانه به ماهانه
+    returns = prices_df.pct_change().dropna()  # بازده روزانه
+    mean_returns = returns.mean() * 252  # بازده مورد انتظار سالانه
+    cov_matrix = returns.cov() * 252  # کوواریانس سالانه
 
     # شبیه‌سازی مونت‌کارلو
     np.random.seed(42)
@@ -168,18 +161,18 @@ if uploaded_files:
         weights = np.random.random(n_assets)
         weights /= np.sum(weights)
 
-        port_return = np.dot(weights, mean_returns_monthly)  # بازده ماهانه
-        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix_monthly, weights)))  # ریسک ماهانه
-        sharpe_ratio = port_return / port_std  # نسبت شارپ ماهانه
+        port_return = np.dot(weights, mean_returns)  # بازده سالانه
+        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))  # ریسک سالانه
+        sharpe_ratio = port_return / port_std  # نسبت شارپ سالانه
 
         results[0, i] = port_return
         results[1, i] = port_std
         results[2, i] = sharpe_ratio
         results[3:, i] = weights
 
-    # انتخاب پرتفو با ریسک ماهانه نزدیک به ۸.۶۶٪
-    target_risk_monthly = 0.30 / np.sqrt(12)  # معادل ماهانه 30% سالانه ≈ 8.66%
-    best_idx = np.argmin(np.abs(results[1] - target_risk_monthly))
+    # انتخاب پرتفو با ریسک سالانه نزدیک به ۳۰٪
+    target_risk = 0.30  # ریسک هدف سالانه
+    best_idx = np.argmin(np.abs(results[1] - target_risk))
 
     best_return = results[0, best_idx]
     best_risk = results[1, best_idx]
@@ -187,59 +180,90 @@ if uploaded_files:
     best_weights = results[3:, best_idx]
 
     # نمایش نتایج
-    st.subheader("📊 نتایج پرتفو پیشنهادی (ماهانه)")
+    st.subheader("📊 نتایج پرتفو پیشنهادی (سالانه)")
     st.markdown(f"""
-    - ✅ **بازده مورد انتظار ماهانه:** {best_return:.2%}  
-    - ⚠️ **ریسک ماهانه:** {best_risk:.2%}  
+    - ✅ **بازده مورد انتظار سالانه:** {best_return:.2%}  
+    - ⚠️ **ریسک سالانه:** {best_risk:.2%}  
     - 🧠 **نسبت شارپ:** {best_sharpe:.2f}  
     """)
 
     for i, name in enumerate(asset_names):
         st.markdown(f"🔹 **وزن {name}:** {best_weights[i]*100:.2f}٪")
 
-    # نمودار پراکندگی پرتفوها
+    # نمودار پراکندگی پرتفوها (تعاملی)
     st.subheader("📈 نمودار پراکندگی پرتفوها (بازده در مقابل ریسک)")
-    fig, ax = plt.subplots(figsize=(8, 6))
-    scatter = ax.scatter(
-        results[1] * 100,  # ریسک ماهانه (درصد)
-        results[0] * 100,  # بازده ماهانه (درصد)
-        c=results[2],  # نسبت شارپ
-        cmap='viridis',
-        alpha=0.6
+    portfolio_df = pd.DataFrame({
+        'ریسک سالانه (%)': results[1] * 100,
+        'بازده سالانه (%)': results[0] * 100,
+        'نسبت شارپ': results[2]
+    })
+    fig = px.scatter(
+        portfolio_df,
+        x='ریسک سالانه (%)',
+        y='بازده سالانه (%)',
+        color='نسبت شارپ',
+        color_continuous_scale='Viridis',
+        opacity=0.6,
+        title='پراکندگی پرتفوهای شبیه‌سازی‌شده',
+        hover_data={'ریسک سالانه (%)': ':.2f', 'بازده سالانه (%)': ':.2f', 'نسبت شارپ': ':.2f'}
     )
-    ax.scatter(
-        best_risk * 100,
-        best_return * 100,
-        color='red',
-        s=200,
-        marker='*',
-        label='پرتفوی بهینه'
+    fig.add_scatter(
+        x=[best_risk * 100],
+        y=[best_return * 100],
+        mode='markers',
+        marker=dict(size=20, color='red', symbol='star'),
+        name='پرتفوی بهینه'
     )
-    plt.colorbar(scatter, label='نسبت شارپ')
-    ax.set_xlabel("ریسک ماهانه (%)")
-    ax.set_ylabel("بازده مورد انتظار ماهانه (%)")
-    ax.set_title("پراکندگی پرتفوهای شبیه‌سازی‌شده")
-    ax.legend()
-    ax.grid(True)
-    st.pyplot(fig)
+    fig.update_layout(
+        xaxis_title="ریسک سالانه (%)",
+        yaxis_title="بازده مورد انتظار سالانه (%)",
+        showlegend=True,
+        hovermode='closest'
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
-    # نمودار سود/زیان
+    # نمودار سود/زیان (تعاملی)
     st.subheader("📈 نمودار سود/زیان پرتفو نسبت به تغییر قیمت‌ها")
     price_changes = np.linspace(-0.5, 0.5, 100)
     total_change = np.zeros_like(price_changes)
-
     for i, w in enumerate(best_weights):
         total_change += w * price_changes
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(price_changes * 100, total_change * 100, label="تغییر ارزش پرتفو")
-    ax.axhline(0, color='black', linestyle='--')
-    ax.set_xlabel("درصد تغییر قیمت دارایی‌ها")
-    ax.set_ylabel("درصد سود/زیان پرتفو")
-    ax.set_title("نمودار سود/زیان پرتفو")
-    ax.grid(True)
-    ax.legend()
-    st.pyplot(fig)
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=price_changes * 100,
+            y=total_change * 100,
+            mode='lines',
+            name='تغییر ارزش پرتفو',
+            line=dict(color='blue')
+        )
+    )
+    fig.add_hline(y=0, line_dash="dash", line_color="black")
+    fig.update_layout(
+        title="نمودار سود/زیان پرتفو",
+        xaxis_title="درصد تغییر قیمت دارایی‌ها",
+        yaxis_title="درصد سود/زیان پرتفو",
+        showlegend=True,
+        hovermode='x'
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # نمودار وزنی پرتفو (تعاملی - دوناتی)
+    st.subheader("📊 نمودار وزنی پرتفو")
+    weights_df = pd.DataFrame({
+        'دارایی': asset_names,
+        'وزن (%)': best_weights * 100
+    })
+    fig = px.pie(
+        weights_df,
+        names='دارایی',
+        values='وزن (%)',
+        hole=0.4,
+        title='وزن دارایی‌ها در پرتفوی بهینه'
+    )
+    fig.update_traces(textinfo='percent+label', hoverinfo='label+percent')
+    st.plotly_chart(fig, use_container_width=True)
 
 else:
     st.warning("لطفاً چند فایل CSV قیمت دارایی‌ها آپلود کنید.")
