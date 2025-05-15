@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -16,12 +15,53 @@ if uploaded_files:
     asset_names = []
 
     for file in uploaded_files:
-        df = pd.read_csv(file)
-        name = file.name.split('.')[0]  # نام دارایی از نام فایل
-        asset_names.append(name)
-        prices_df[name] = df['Adj Close']
+        name = file.name.split('.')[0]
+        try:
+            # خواندن فایل CSV
+            df = pd.read_csv(file, thousands=',')
+            df.columns = df.columns.str.strip().str.lower()
+
+            # بررسی وجود ستون‌های مورد نیاز
+            if 'date' not in df.columns or 'price' not in df.columns:
+                st.error(f"فایل {name} باید شامل ستون‌های 'date' و 'price' باشد. ستون‌های موجود: {list(df.columns)}")
+                continue
+
+            # انتخاب ستون‌های تاریخ و قیمت
+            df = df[['date', 'price']].copy()
+
+            # تبدیل تاریخ به datetime و قیمت به عددی
+            df['date'] = pd.to_datetime(df['date'], errors='coerce', utc=True)
+            df['price'] = pd.to_numeric(df['price'], errors='coerce')
+            df.dropna(subset=['date', 'price'], inplace=True)
+
+            if df.empty:
+                st.error(f"فایل {name} پس از پردازش هیچ داده معتبری ندارد.")
+                continue
+
+            # تنظیم ایندکس
+            df.set_index('date', inplace=True)
+            prices_df[name] = df['price']
+            asset_names.append(name)
+        except Exception as e:
+            st.error(f"خطا در پردازش فایل {name}: {e}")
+
+    if prices_df.empty:
+        st.error("❌ هیچ داده معتبری برای تحلیل وجود ندارد.")
+        st.stop()
+
+    # بررسی نوع ایندکس
+    if not pd.api.types.is_datetime64_any_dtype(prices_df.index):
+        st.error("⛔ ایندکس باید از نوع datetime باشد.")
+        st.stop()
+
+    st.subheader("🧾 پیش‌نمایش داده‌های قیمت")
+    st.dataframe(prices_df.tail())
 
     returns = prices_df.pct_change().dropna()
+    if returns.empty:
+        st.error("❌ داده‌های کافی برای محاسبه بازده وجود ندارد.")
+        st.stop()
+
     mean_returns = returns.mean() * 252
     cov_matrix = returns.cov() * 252
 
@@ -82,4 +122,4 @@ if uploaded_files:
     st.pyplot(plt)
 
 else:
-    st.warning("لطفاً چند فایل CSV قیمت دارایی‌ها آپلود کنید.")
+    st.warning("لطفاً فایل‌های CSV با ستون‌های 'date' و 'price' آپلود کنید.")
