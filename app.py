@@ -7,8 +7,10 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="تحلیل پرتفو کامل", layout="wide")
 st.title("📈 تحلیل پرتفو با بیمه آپشن، مونت‌کارلو، سود و زیان تخمینی و انحراف معیار")
 
-st.sidebar.header("📂 فایل‌های CSV")
-uploaded_files = st.sidebar.file_uploader("آپلود فایل‌های CSV (هر فایل یک دارایی)", type=["csv"], accept_multiple_files=True)
+st.sidebar.header("📂 بارگذاری فایل‌های CSV")
+uploaded_files = st.sidebar.file_uploader(
+    "آپلود فایل‌های CSV (هر فایل یک دارایی با ستون‌های Date و Price)", 
+    type=["csv"], accept_multiple_files=True)
 
 period = st.sidebar.selectbox("بازه تحلیل:", ['روزانه', 'ماهانه', 'سه‌ماهه'])
 if period == 'روزانه':
@@ -28,37 +30,61 @@ if uploaded_files:
 
     for file in uploaded_files:
         name = file.name.split('.')[0]
-        df = pd.read_csv(file, thousands=',')
-        df.columns = df.columns.str.strip().str.lower()
-        df.rename(columns={"date": "Date", "price": "Price"}, inplace=True)
+        try:
+            # خواندن فایل با حذف کاما در اعداد
+            df = pd.read_csv(file, thousands=',')
 
-        if 'Date' not in df.columns or 'Price' not in df.columns:
-            st.error(f"فایل {name} فاقد ستون‌های 'Date' و 'Price' است.")
-            continue
+            # اصلاح نام ستون‌ها
+            df.columns = df.columns.str.strip().str.lower()
+            df.rename(columns={'date': 'Date', 'price': 'Price'}, inplace=True)
 
-        df = df[['Date', 'Price']].dropna()
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df = df.dropna(subset=['Date'])
-        df.set_index('Date', inplace=True)
-        df = df[['Price']]
-        df.columns = [name]
+            # چک کردن ستون‌های مورد نیاز
+            if 'Date' not in df.columns or 'Price' not in df.columns:
+                st.error(f"فایل {name} باید ستون‌های 'Date' و 'Price' داشته باشد. ستون‌های موجود: {df.columns.tolist()}")
+                continue
 
-        if prices_df.empty:
-            prices_df = df
-        else:
-            prices_df = prices_df.join(df, how='inner')
+            # فقط ستون‌های Date و Price را نگه دار
+            df = df[['Date', 'Price']].copy()
+            df.dropna(subset=['Date', 'Price'], inplace=True)
 
-        asset_names.append(name)
+            # تبدیل تاریخ
+            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+            df.dropna(subset=['Date'], inplace=True)
+
+            # ایندکس‌گذاری تاریخ
+            df.set_index('Date', inplace=True)
+
+            # فقط ستون Price باقی می‌ماند
+            df = df[['Price']]
+
+            # تغییر نام ستون Price به نام دارایی
+            df.columns = [name]
+
+            # ادغام دیتاها
+            if prices_df.empty:
+                prices_df = df
+            else:
+                prices_df = prices_df.join(df, how='inner')
+
+            asset_names.append(name)
+        except Exception as e:
+            st.error(f"خطا در پردازش فایل {name}: {e}")
 
     if prices_df.empty:
-        st.error("❌ هیچ داده معتبری برای تحلیل وجود ندارد.")
+        st.error("❌ داده معتبری برای تحلیل وجود ندارد.")
         st.stop()
 
     st.subheader("🧾 پیش‌نمایش داده‌های قیمت")
     st.dataframe(prices_df.tail())
 
+    # محاسبه بازده و کوواریانس
     prices_resampled = prices_df.resample(resample_rule).last().dropna()
     returns = prices_resampled.pct_change().dropna()
+
+    if returns.empty:
+        st.error("❌ بازده قابل محاسبه نیست، لطفاً فایل‌ها را بررسی کنید.")
+        st.stop()
+
     mean_returns = returns.mean() * annual_factor
     cov_matrix = returns.cov() * annual_factor
     std_devs = np.sqrt(np.diag(cov_matrix))
