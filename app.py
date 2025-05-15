@@ -158,7 +158,7 @@ if uploaded_files:
     st.plotly_chart(fig)
 
     st.subheader("💰 محاسبه سود و زیان تخمینی (دلار آمریکا)")
-    
+
     base_amount = st.number_input("مقدار دارایی پایه (تعداد واحد)", min_value=0.0, value=1.0, step=0.01)
     base_price_usd = st.number_input("قیمت پایه دلاری هر واحد دارایی", min_value=0.0, value=1000.0, step=0.01)
 
@@ -176,10 +176,14 @@ if uploaded_files:
     lower_bound = best_return - z_score * best_risk
     upper_bound = best_return + z_score * best_risk
 
-    st.markdown(f"""
-    - 🎯 **احتمال بازده در بازه ±1 انحراف معیار ({confidence_level*100:.0f}%):**  
-      از {lower_bound:.2%} تا {upper_bound:.2%}
-    """)
+    st.markdown("### 🎯 بازده مورد انتظار سالانه:")
+    st.write(f"{best_return:.2%}")
+
+    st.markdown("### 📊 ریسک سالانه (انحراف معیار):")
+    st.write(f"{best_risk:.2%}")
+
+    st.markdown(f"### 🎯 احتمال بازده در بازه ±1 انحراف معیار (حدود {confidence_level*100:.0f}% احتمال):")
+    st.write(f"از {lower_bound:.2%} تا {upper_bound:.2%}")
 
 else:
     st.warning("لطفاً فایل‌های CSV شامل ستون‌های Date و Price را آپلود کنید.")
