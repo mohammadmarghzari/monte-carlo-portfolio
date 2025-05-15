@@ -18,12 +18,9 @@ if period == 'روزانه': resample_rule, annual_factor = 'D', 252
 elif period == 'ماهانه': resample_rule, annual_factor = 'M', 12
 else: resample_rule, annual_factor = 'Q', 4
 
-# اگر MPT انتخاب شده، ریسک هدف انتخاب شود
 target_risk_slider = st.sidebar.slider("🎯 ریسک هدف برای مرز کارا (٪)", 1.0, 50.0, 25.0, step=0.1) / 100
-
 use_put_option = st.sidebar.checkbox("📉 فعال‌سازی بیمه با آپشن پوت")
 
-# خواندن فایل‌ها و تنظیم داده‌ها
 if uploaded_files:
     prices_df = pd.DataFrame()
     asset_names = []
@@ -36,20 +33,20 @@ if uploaded_files:
             continue
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
-        df = df.dropna().set_index('Date')
+        df = df[['Date', 'Price']].dropna()
+        df.set_index('Date', inplace=True)
         df.columns = [name]
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
         asset_names.append(name)
 
-    # بازده و کوواریانس
     returns = prices_df.resample(resample_rule).last().pct_change().dropna()
     mean_returns = returns.mean() * annual_factor
     cov_matrix = returns.cov() * annual_factor
     asset_std = np.sqrt(np.diag(cov_matrix))
 
-    # ورودی‌های بیمه برای هر دارایی
     base_amounts, base_prices, option_contracts, option_strikes, option_premiums = {}, {}, {}, {}, {}
     coverage = {}
+
     if use_put_option:
         st.header("🛡 تنظیمات بیمه آپشن برای هر دارایی")
         for asset in asset_names:
@@ -59,13 +56,10 @@ if uploaded_files:
             option_contracts[asset] = st.number_input(f"تعداد قرارداد آپشن - {asset}", 0.0, 1e6, 0.0, step=0.0001, format="%.6f", key=f"contracts_{asset}")
             option_strikes[asset] = st.number_input(f"قیمت اعمال - {asset}", 0.0, 1e6, 1000.0, step=0.01, format="%.6f", key=f"strike_{asset}")
             option_premiums[asset] = st.number_input(f"قیمت آپشن - {asset}", 0.0, 1e6, 50.0, step=0.01, format="%.6f", key=f"premium_{asset}")
-            
-            # محاسبه پوشش واقعی و سود آپشن
             insured_value = option_contracts[asset] * option_strikes[asset]
             base_value = base_amounts[asset] * base_prices[asset] + 1e-10
             coverage[asset] = min(insured_value / base_value, 1.0)
 
-        # تعدیل بازده و کوواریانس با اثر بیمه
         adj_returns = mean_returns.copy()
         for asset in asset_names:
             pnl = max(0, option_strikes[asset] - base_prices[asset]) * option_contracts[asset] - option_premiums[asset] * option_contracts[asset]
@@ -76,12 +70,11 @@ if uploaded_files:
             for j, a2 in enumerate(asset_names):
                 c1 = coverage.get(a1, 0)
                 c2 = coverage.get(a2, 0)
-                adj_cov.iloc[i, j] = adj_cov.iloc[i, j] * (1 - (c1 + c2)/2) ** 1.5
+                adj_cov.iloc[i, j] *= (1 - (c1 + c2) / 2) ** 1.5
     else:
         adj_returns = mean_returns
         adj_cov = cov_matrix
 
-    # مدل مونت‌کارلو یا مرز کارا
     st.header("📊 نتایج پرتفو")
     n = 10000 if analysis_mode == "مونت‌کارلو (MC)" else 500
     results = np.zeros((3 + len(asset_names), n))
@@ -97,7 +90,6 @@ if uploaded_files:
         results[2, i] = sharpe
         results[3:, i] = weights
 
-    # انتخاب پرتفو نزدیک به ریسک هدف
     idx_best = np.argmin(np.abs(results[1] - target_risk_slider))
     ret, risk, sharpe = results[0, idx_best], results[1, idx_best], results[2, idx_best]
     weights = results[3:, idx_best]
