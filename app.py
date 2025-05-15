@@ -158,6 +158,7 @@ if uploaded_files:
     st.plotly_chart(fig)
 
     st.subheader("💰 محاسبه سود و زیان تخمینی (دلار آمریکا)")
+    
     base_amount = st.number_input("مقدار دارایی پایه (تعداد واحد)", min_value=0.0, value=1.0, step=0.01)
     base_price_usd = st.number_input("قیمت پایه دلاری هر واحد دارایی", min_value=0.0, value=1000.0, step=0.01)
 
