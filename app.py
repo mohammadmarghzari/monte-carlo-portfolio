@@ -70,7 +70,7 @@ if uploaded_files:
                 st.error(f"فایل {name} پس از پردازش هیچ داده معتبری نداره.")
                 continue
             df.set_index(date_col, inplace=True)
-            # فقط ستون قیمت را به نام asset تغییر بده
+            # فقط نام ستون قیمت را به نام دارایی تغییر بده، نه کل ستون‌ها را!
             df.rename(columns={price_col: name}, inplace=True)
 
             if prices_df.empty:
