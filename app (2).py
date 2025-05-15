@@ -140,6 +140,5 @@ if uploaded_files:
         st.info(f"✅ ریسک تعدیل‌شده پرتفو پس از بیمه: {adjusted_risk:.2%}")
     else:
         st.success("✅ ریسک پرتفو در محدوده قابل‌قبول است. نیازی به بیمه نیست.")
-
 else:
     st.warning("لطفاً فایل‌های CSV شامل ستون‌های Date و Price را آپلود کنید.")
