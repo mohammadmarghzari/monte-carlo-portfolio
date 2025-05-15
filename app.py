@@ -4,21 +4,20 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 
-# تنظیمات صفحه
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو", layout="wide")
 st.title("📈 ابزار تحلیل پرتفو با روش مونت‌کارلو")
 st.markdown("هدف: ساخت پرتفو با بازده بالا و ریسک کنترل‌شده")
 
-# تابع خواندن فایل CSV
 def read_csv_file(file):
     try:
         df = pd.read_csv(file)
+        df.columns = df.columns.str.strip().str.replace('%', '').str.lower()
+        df.rename(columns={'date': 'Date', 'price': 'Price'}, inplace=True)
         return df
     except Exception as e:
         st.error(f"خطا در خواندن فایل {file.name}: {e}")
         return None
 
-# سایدبار برای آپلود فایل‌ها
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV آپلود کنید (هر دارایی یک فایل)",
@@ -26,7 +25,6 @@ uploaded_files = st.sidebar.file_uploader(
     accept_multiple_files=True
 )
 
-# انتخاب بازه زمانی تحلیل
 period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
 if period == 'ماهانه':
     resample_rule = 'M'
@@ -38,7 +36,6 @@ else:
     resample_rule = '2Q'
     annual_factor = 2
 
-# اگر فایل‌ها آپلود شدند
 if uploaded_files:
     prices_df = pd.DataFrame()
     asset_names = []
@@ -49,11 +46,13 @@ if uploaded_files:
             continue
 
         name = file.name.split('.')[0]
+
         if 'Date' not in df.columns or 'Price' not in df.columns:
-            st.warning(f"فایل {name} باید دارای ستون‌های 'Date' و 'Price' باشد.")
+            st.warning(f"فایل {name} باید دارای ستون‌های 'Date' و 'Price' باشد. ستون‌های یافت‌شده: {df.columns.tolist()}")
             continue
 
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
         df = df.dropna(subset=['Date', 'Price'])
         df = df[['Date', 'Price']].set_index('Date')
         df.columns = [name]
@@ -69,15 +68,26 @@ if uploaded_files:
         st.error("❌ داده‌ی معتبری برای تحلیل یافت نشد.")
         st.stop()
 
-    # محاسبه بازده‌ها
+    st.subheader("🧪 پیش‌نمایش داده‌ها (آخرین قیمت‌های هر فایل)")
+    st.dataframe(prices_df.tail())
+
     resampled_prices = prices_df.resample(resample_rule).last()
     resampled_prices = resampled_prices.apply(pd.to_numeric, errors='coerce')
     resampled_prices = resampled_prices.dropna()
+
+    if resampled_prices.empty:
+        st.error("❌ داده‌ها پس از بازنمونه‌گیری (resample) خالی شدند.")
+        st.stop()
+
     returns = resampled_prices.pct_change().dropna()
+
+    if returns.empty:
+        st.error("❌ محاسبه بازده ممکن نیست. لطفاً فایل‌ها را بررسی کنید.")
+        st.stop()
+
     mean_returns = returns.mean() * annual_factor
     cov_matrix = returns.cov() * annual_factor
 
-    # شبیه‌سازی مونت‌کارلو
     np.random.seed(42)
     n_portfolios = 10000
     n_assets = len(asset_names)
@@ -94,7 +104,6 @@ if uploaded_files:
         results[2, i] = sharpe_ratio
         results[3:, i] = weights
 
-    # انتخاب پرتفو با ریسک هدف
     target_risk = 0.30
     best_idx = np.argmin(np.abs(results[1] - target_risk))
     best_return = results[0, best_idx]
@@ -102,13 +111,12 @@ if uploaded_files:
     best_sharpe = results[2, best_idx]
     best_weights = results[3:, best_idx]
 
-    # مدیریت ریسک با درصد پوشش بیمه‌ای آپشن پوت
     st.subheader("🛡 مدیریت ریسک با آپشن پوت")
     use_put_option = st.checkbox("فعال‌سازی بیمه با آپشن پوت")
 
     if use_put_option:
         insurance_percent = st.number_input(
-            "درصد پوشش بیمه (درصدی از پرتفو که بیمه می‌شود)", 
+            "درصد پوشش بیمه (درصدی از پرتفو که بیمه می‌شود)",
             min_value=0.0, max_value=100.0, value=30.0, step=1.0
         )
         adjusted_risk = best_risk * (1 - (insurance_percent / 100))
@@ -120,7 +128,6 @@ if uploaded_files:
         risk_for_display = best_risk
         sharpe_for_display = best_sharpe
 
-    # نمایش نتایج پرتفو
     st.subheader("📊 نتایج پرتفو پیشنهادی (سالانه)")
     st.markdown(f"""
     - ✅ **بازده مورد انتظار سالانه:** {best_return:.2%}  
@@ -130,7 +137,6 @@ if uploaded_files:
     for i, name in enumerate(asset_names):
         st.markdown(f"🔹 **وزن {name}:** {best_weights[i]*100:.2f}%")
 
-    # نمودار پراکندگی تعاملی به انگلیسی
     st.subheader("📈 Portfolio Risk/Return Scatter Plot (Interactive)")
     fig = px.scatter(
         x=results[1]*100,
