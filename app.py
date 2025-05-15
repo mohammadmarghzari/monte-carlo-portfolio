@@ -5,9 +5,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from scipy.stats import norm
 
-st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو + مرز کارا", layout="wide")
-st.title("📈 ابزار تحلیل پرتفو با روش‌های مونت‌کارلو و مرز کارا")
-st.markdown("هدف: تحلیل و بهینه‌سازی پرتفو با بیمه آپشن و انتخاب روش تحلیل")
+st.set_page_config(page_title="تحلیل پرتفو با آپشن و مونت‌کارلو + مرز کارا", layout="wide")
+st.title("📈 تحلیل پرتفو با بیمه آپشن، مونت‌کارلو و مرز کارا")
+st.markdown("هدف: محاسبه دقیق بازده و ریسک با پوشش آپشن پوت")
 
 def read_csv_file(file):
     try:
@@ -87,20 +87,50 @@ if uploaded_files:
 
     asset_std_devs = np.sqrt(np.diag(cov_matrix))
 
-    # اصلاح وزن‌دهی با بیمه آپشن پوت (وزن پرریسک بیشتر وقتی بیمه فعال است)
-    use_put_option = st.checkbox("فعال‌سازی بیمه با آپشن پوت")
-    if use_put_option:
-        insurance_percent = st.number_input("درصد پوشش بیمه (٪ از پرتفو)", min_value=0.0, max_value=100.0, value=30.0)
-        # لوجیک اصلاح شده: وقتی بیمه هست، پرریسک‌ها وزن بیشتری می‌گیرن
-        effective_std = asset_std_devs * (1 - insurance_percent / 100)
-        # نسبت معکوس نسبت به کاهش ریسک یعنی ریسک بالاتر وزن بیشتر
-        preference_weights = effective_std / asset_std_devs
-        adjusted_cov = cov_matrix * (1 - insurance_percent / 100)**2
-    else:
-        preference_weights = 1 / asset_std_devs
-        adjusted_cov = cov_matrix
+    # ورودی‌های بیمه آپشن
+    st.sidebar.subheader("بیمه آپشن پوت")
+    use_put_option = st.sidebar.checkbox("فعال‌سازی بیمه با آپشن پوت")
 
-    preference_weights /= np.sum(preference_weights)
+    if use_put_option:
+        insurance_percent = st.sidebar.number_input("درصد پوشش بیمه (٪ از پرتفو)", min_value=0.0, max_value=100.0, value=30.0)
+        option_strike_price = st.sidebar.number_input("قیمت اعمال (Strike Price) آپشن", min_value=0.0, value=1000.0)
+        option_premium = st.sidebar.number_input("قیمت آپشن (Premium)", min_value=0.0, value=50.0)
+        option_contracts = st.sidebar.number_input("تعداد قرارداد آپشن", min_value=0, value=1)
+
+        # ورودی دارایی پایه برای محاسبه پوشش واقعی
+        base_amount = st.number_input("مقدار دارایی پایه (تعداد واحد)", min_value=0.0, value=1.0, step=0.01)
+        base_price_usd = st.number_input("قیمت پایه دلاری هر واحد دارایی", min_value=0.0, value=1000.0, step=0.01)
+
+        total_value_usd = base_amount * base_price_usd
+
+        # محاسبه پوشش پوشش بیمه بر اساس قیمت اعمال و تعداد قرارداد آپشن
+        # فرض: هر قرارداد آپشن معادل ۱ واحد دارایی پایه (اگر لازم بود عددش رو تنظیم کن)
+        insurance_coverage_value = option_contracts * option_strike_price
+
+        # درصد پوشش واقعی روی کل پرتفوی
+        real_coverage_percent = min(insurance_coverage_value / total_value_usd, 1.0)
+
+        st.write(f"درصد واقعی پوشش بیمه شده از پرتفو: {real_coverage_percent*100:.2f}%")
+
+        # هزینه کل بیمه (Premium * تعداد قرارداد)
+        total_premium_cost = option_premium * option_contracts
+
+        # کاهش بازده پرتفوی بخاطر هزینه بیمه
+        adjusted_mean_returns = mean_returns * (1 - real_coverage_percent) - total_premium_cost / total_value_usd
+
+        # کاهش کوواریانس (ریسک) به دلیل بیمه آپشن (کاهش ریسک به میزان پوشش واقعی)
+        adjusted_cov = cov_matrix * (1 - real_coverage_percent) ** 2
+
+        # وزن‌دهی ترجیحی: وقتی بیمه هست، وزن دارایی‌های ریسک بالاتر بیشتر می‌شود
+        effective_std = asset_std_devs * (1 - real_coverage_percent)
+        preference_weights = effective_std / asset_std_devs
+        preference_weights /= np.sum(preference_weights)
+
+    else:
+        adjusted_mean_returns = mean_returns
+        adjusted_cov = cov_matrix
+        preference_weights = 1 / asset_std_devs
+        preference_weights /= np.sum(preference_weights)
 
     np.random.seed(42)
 
@@ -114,9 +144,9 @@ if uploaded_files:
             random_factors = np.random.random(n_assets)
             weights = random_factors * preference_weights
             weights /= np.sum(weights)
-            port_return = np.dot(weights, mean_returns)
+            port_return = np.dot(weights, adjusted_mean_returns)
             port_std = np.sqrt(np.dot(weights.T, np.dot(adjusted_cov, weights)))
-            sharpe_ratio = port_return / port_std
+            sharpe_ratio = port_return / port_std if port_std != 0 else 0
             results[0, i] = port_return
             results[1, i] = port_std
             results[2, i] = sharpe_ratio
@@ -160,13 +190,12 @@ if uploaded_files:
         n_assets = len(asset_names)
         results = np.zeros((3 + n_assets, n_points))
 
-        # مرز کارا: وزن‌های تصادفی و محاسبه بازده و ریسک
         for i in range(n_points):
             weights = np.random.random(n_assets)
             weights /= np.sum(weights)
-            port_return = np.dot(weights, mean_returns)
-            port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-            sharpe = port_return / port_std
+            port_return = np.dot(weights, adjusted_mean_returns)
+            port_std = np.sqrt(np.dot(weights.T, np.dot(adjusted_cov, weights)))
+            sharpe = port_return / port_std if port_std != 0 else 0
             results[0, i] = port_return
             results[1, i] = port_std
             results[2, i] = sharpe
@@ -203,18 +232,17 @@ if uploaded_files:
         st.plotly_chart(fig)
 
     st.subheader("💰 محاسبه سود و زیان تخمینی (دلار آمریکا)")
-    base_amount = st.number_input("مقدار دارایی پایه (تعداد واحد)", min_value=0.0, value=1.0, step=0.01)
-    base_price_usd = st.number_input("قیمت پایه دلاری هر واحد دارایی", min_value=0.0, value=1000.0, step=0.01)
-
     total_value_usd = base_amount * base_price_usd
 
-    # انتخاب بازده تخمینی براساس حالت تحلیل
+    # انتخاب بازده و ریسک مطابق روش تحلیل
     if analysis_mode == "مونت‌کارلو (MC)":
         selected_return = best_return
         selected_risk = best_risk
+        selected_weights = best_weights
     else:
         selected_return = r_return
         selected_risk = r_risk
+        selected_weights = r_weights
 
     estimated_profit_usd = total_value_usd * selected_return
     estimated_loss_usd = total_value_usd * selected_risk
