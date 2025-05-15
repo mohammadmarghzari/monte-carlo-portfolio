@@ -36,8 +36,11 @@ if uploaded_files:
                 skipinitialspace=True   # حذف فاصله‌های اضافی
             )
 
-            # پاکسازی نام ستون‌ها (حذف نقل‌قول‌ها و تبدیل به حروف کوچک)
+            # پاکسازی نام ستون‌ها
             df.columns = df.columns.str.strip().str.lower().str.replace('"', '')
+
+            # نمایش ستون‌های خام برای دیباگ
+            st.write(f"ستون‌های فایل {name}: {list(df.columns)}")
 
             # بررسی وجود ستون‌های تاریخ و قیمت
             date_col = None
@@ -53,10 +56,21 @@ if uploaded_files:
             # انتخاب ستون‌های مورد نیاز
             df = df[[date_col, price_col]].copy()
 
-            # تبدیل ستون تاریخ به datetime
+            # تبدیل ستون تاریخ به datetime با فرمت‌های مختلف
             df[date_col] = pd.to_datetime(df[date_col], errors='coerce', utc=True)
+            if df[date_col].isna().all():
+                # امتحان فرمت‌های دیگر
+                for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%Y/%m/%d']:
+                    df[date_col] = pd.to_datetime(df[date_col], format=fmt, errors='coerce', utc=True)
+                    if not df[date_col].isna().all():
+                        break
+                if df[date_col].isna().all():
+                    st.error(f"ستون تاریخ ({date_col}) در فایل {name} به درستی به datetime تبدیل نشد. لطفاً فرمت تاریخ رو چک کن (مثال: '2024-05-15' یا '15/05/2024').")
+                    continue
+
             # تبدیل ستون قیمت به عددی
             df[price_col] = pd.to_numeric(df[price_col], errors='coerce')
+
             # حذف ردیف‌های نامعتبر
             df.dropna(subset=[date_col, price_col], inplace=True)
 
@@ -64,7 +78,7 @@ if uploaded_files:
                 st.error(f"فایل {name} پس از پردازش هیچ داده معتبری نداره.")
                 continue
 
-            # تنظیم ایندکس و تغییر نام ستون قیمت
+            # تنظیم ایندکس
             df.set_index(date_col, inplace=True)
             df.rename(columns={price_col: name}, inplace=True)
 
@@ -82,9 +96,9 @@ if uploaded_files:
         st.error("❌ هیچ داده معتبری برای تحلیل وجود نداره.")
         st.stop()
 
-    # بررسی نوع ایندکس
+    # بررسی نوع ایندکس قبل از resample
     if not pd.api.types.is_datetime64_any_dtype(prices_df.index):
-        st.error("⛔ ایندکس باید از نوع datetime باشه. لطفاً فرمت ستون تاریخ رو چک کن.")
+        st.error("⛔ ایندکس دیتافریم از نوع datetime نیست. لطفاً فرمت ستون‌های تاریخ رو چک کن.")
         st.stop()
 
     st.subheader("🧾 پیش‌نمایش داده‌های قیمت")
@@ -141,7 +155,7 @@ if uploaded_files:
         results[2, i] = sharpe
         results[3:, i] = weights
 
-    # انتخاب پرتفو با حداکثر نسبت شارپ به جای ریسک هدف
+    # انتخاب پرتفو با حداکثر نسبت شارپ
     idx = np.argmax(results[2])
     best_ret, best_risk, best_sharpe = results[0, idx], results[1, idx], results[2, idx]
     best_weights = results[3:, idx]
