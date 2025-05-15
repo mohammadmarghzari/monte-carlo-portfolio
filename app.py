@@ -89,13 +89,31 @@ if uploaded_files:
     mean_returns = returns.mean() * annual_factor
     cov_matrix = returns.cov() * annual_factor
 
+    # انحراف معیار سالانه برای هر دارایی
+    asset_std_devs = np.sqrt(np.diag(cov_matrix))
+
+    # 📌 تنظیم وزن ترجیحی دارایی‌ها بر اساس وضعیت بیمه
+    use_put_option = st.checkbox("فعال‌سازی بیمه با آپشن پوت")
+    if use_put_option:
+        insurance_percent = st.number_input(
+            "درصد پوشش بیمه (٪ از پرتفو)", min_value=0.0, max_value=100.0, value=30.0
+        )
+        effective_risk = asset_std_devs * (1 - insurance_percent / 100)
+        preference_weights = asset_std_devs / effective_risk
+    else:
+        preference_weights = 1 / asset_std_devs
+
+    preference_weights = preference_weights / np.sum(preference_weights)
+
+    # شبیه‌سازی مونت‌کارلو
     np.random.seed(42)
     n_portfolios = 10000
     n_assets = len(asset_names)
     results = np.zeros((3 + n_assets, n_portfolios))
 
     for i in range(n_portfolios):
-        weights = np.random.random(n_assets)
+        random_factors = np.random.random(n_assets)
+        weights = random_factors * preference_weights
         weights /= np.sum(weights)
         port_return = np.dot(weights, mean_returns)
         port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
@@ -112,28 +130,11 @@ if uploaded_files:
     best_sharpe = results[2, best_idx]
     best_weights = results[3:, best_idx]
 
-    st.subheader("🛡 مدیریت ریسک با آپشن پوت")
-    use_put_option = st.checkbox("فعال‌سازی بیمه با آپشن پوت")
-
-    if use_put_option:
-        insurance_percent = st.number_input(
-            "درصد پوشش بیمه (درصدی از پرتفو که بیمه می‌شود)",
-            min_value=0.0, max_value=100.0, value=30.0, step=1.0
-        )
-        adjusted_risk = best_risk * (1 - (insurance_percent / 100))
-        adjusted_sharpe = best_return / adjusted_risk if adjusted_risk != 0 else 0
-        risk_for_display = adjusted_risk
-        sharpe_for_display = adjusted_sharpe
-        st.info(f"✅ ریسک بیمه‌شده: {adjusted_risk:.2%} | نسبت شارپ جدید: {adjusted_sharpe:.2f}")
-    else:
-        risk_for_display = best_risk
-        sharpe_for_display = best_sharpe
-
     st.subheader("📊 نتایج پرتفو پیشنهادی (سالانه)")
     st.markdown(f"""
     - ✅ **بازده مورد انتظار سالانه:** {best_return:.2%}  
-    - ⚠️ **ریسک سالانه (انحراف معیار):** {risk_for_display:.2%}  
-    - 🧠 **نسبت شارپ:** {sharpe_for_display:.2f}
+    - ⚠️ **ریسک سالانه (انحراف معیار):** {best_risk:.2%}  
+    - 🧠 **نسبت شارپ:** {best_sharpe:.2f}
     """)
     for i, name in enumerate(asset_names):
         st.markdown(f"🔹 **وزن {name}:** {best_weights[i]*100:.2f}%")
@@ -148,7 +149,7 @@ if uploaded_files:
         color_continuous_scale='Viridis'
     )
     fig.add_trace(go.Scatter(
-        x=[risk_for_display * 100],
+        x=[best_risk * 100],
         y=[best_return * 100],
         mode='markers',
         marker=dict(color='red', size=12, symbol='star'),
