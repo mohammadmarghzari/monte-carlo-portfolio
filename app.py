@@ -110,7 +110,7 @@ if uploaded_files:
             )
             option_contracts[asset] = st.number_input(
                 f"تعداد قرارداد آپشن - {asset}",
-                min_value=0, value=0, step=1, key=f"option_contracts_{asset}"
+                min_value=0.0, value=0.0, step=0.0001, format="%.6f", key=f"option_contracts_{asset}"
             )
             option_strikes[asset] = st.number_input(
                 f"قیمت اعمال (Strike Price) آپشن - {asset}",
