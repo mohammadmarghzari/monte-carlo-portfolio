@@ -25,29 +25,32 @@ if uploaded_files:
     for file in uploaded_files:
         name = file.name.split('.')[0]
         try:
+            # خواندن فایل CSV و شناسایی ستون‌ها
             df = pd.read_csv(file, thousands=',', sep=';')  # جداکننده ; برای فایل CSV
             df.columns = df.columns.str.strip().str.lower()
 
-            # نگاشت ستون‌های فایل به Date و Price
-            if 'timeopen' not in df.columns or 'close' not in df.columns:
-                st.error(f"فایل {name} فاقد ستون‌های 'timeopen' و 'close' است. فایل باید شامل ستون‌های 'timeopen' و 'close' باشد.")
+            # بررسی وجود ستون‌های مورد نیاز
+            required_columns = ['timeopen', 'close']
+            if not all(col in df.columns for col in required_columns):
+                st.error(f"فایل {name} باید شامل ستون‌های 'timeopen' و 'close' باشد. ستون‌های موجود: {list(df.columns)}")
                 continue
 
+            # انتخاب و نگاشت ستون‌های مورد نیاز
             df = df[['timeopen', 'close']].copy()
-            df.rename(columns={'timeopen': 'Date', 'close': 'Price'}, inplace=True)
+            df.rename(columns={'timeopen': 'Date', 'close': name}, inplace=True)
 
             # تبدیل ستون Date به datetime
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce', utc=True)
-            df['Price'] = pd.to_numeric(df['Price'], errors='coerce')  # اطمینان از عددی بودن ستون Price
-            df.dropna(subset=['Date', 'Price'], inplace=True)
+            df[name] = pd.to_numeric(df[name], errors='coerce')  # اطمینان از عددی بودن ستون قیمت
+            df.dropna(subset=['Date', name], inplace=True)
 
             if df.empty:
                 st.error(f"فایل {name} پس از پردازش هیچ داده معتبری ندارد.")
                 continue
 
+            # تنظیم ایندکس
             df.set_index('Date', inplace=True)
-            df = df[['Price']]
-            df.rename(columns={'Price': name}, inplace=True)
+            df = df[[name]]  # فقط ستون قیمت (با نام دارایی) نگه داشته شود
 
             if prices_df.empty:
                 prices_df = df
@@ -66,9 +69,6 @@ if uploaded_files:
     if not pd.api.types.is_datetime64_any_dtype(prices_df.index):
         st.error("⛔ ایندکس باید از نوع datetime باشد. لطفاً مطمئن شوید که ستون تاریخ به درستی فرمت شده است.")
         st.stop()
-
-    # تبدیل ایندکس به تاریخ بدون اطلاعات زمانی (در صورت نیاز)
-    prices_df.index = prices_df.index.date
 
     st.subheader("🧾 پیش‌نمایش داده‌های قیمت")
     st.dataframe(prices_df.tail())
@@ -121,7 +121,7 @@ if uploaded_files:
         sharpe = ret / risk if risk != 0 else 0
         results[0, i] = ret
         results[1, i] = risk
-        results[2 Inglish, i] = sharpe
+        results[2, i] = sharpe
         results[3:, i] = weights
 
     idx = np.argmin(np.abs(results[1] - target_risk))
