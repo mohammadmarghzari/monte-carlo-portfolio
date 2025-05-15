@@ -71,6 +71,8 @@ if uploaded_files:
 
     # محاسبه بازده‌ها
     resampled_prices = prices_df.resample(resample_rule).last()
+    resampled_prices = resampled_prices.apply(pd.to_numeric, errors='coerce')
+    resampled_prices = resampled_prices.dropna()
     returns = resampled_prices.pct_change().dropna()
     mean_returns = returns.mean() * annual_factor
     cov_matrix = returns.cov() * annual_factor
@@ -100,12 +102,30 @@ if uploaded_files:
     best_sharpe = results[2, best_idx]
     best_weights = results[3:, best_idx]
 
+    # مدیریت ریسک با درصد پوشش بیمه‌ای آپشن پوت
+    st.subheader("🛡 مدیریت ریسک با آپشن پوت")
+    use_put_option = st.checkbox("فعال‌سازی بیمه با آپشن پوت")
+
+    if use_put_option:
+        insurance_percent = st.number_input(
+            "درصد پوشش بیمه (درصدی از پرتفو که بیمه می‌شود)", 
+            min_value=0.0, max_value=100.0, value=30.0, step=1.0
+        )
+        adjusted_risk = best_risk * (1 - (insurance_percent / 100))
+        adjusted_sharpe = best_return / adjusted_risk if adjusted_risk != 0 else 0
+        risk_for_display = adjusted_risk
+        sharpe_for_display = adjusted_sharpe
+        st.info(f"✅ ریسک بیمه‌شده: {adjusted_risk:.2%} | نسبت شارپ جدید: {adjusted_sharpe:.2f}")
+    else:
+        risk_for_display = best_risk
+        sharpe_for_display = best_sharpe
+
     # نمایش نتایج پرتفو
     st.subheader("📊 نتایج پرتفو پیشنهادی (سالانه)")
     st.markdown(f"""
     - ✅ **بازده مورد انتظار سالانه:** {best_return:.2%}  
-    - ⚠️ **ریسک سالانه (انحراف معیار):** {best_risk:.2%}  
-    - 🧠 **نسبت شارپ:** {best_sharpe:.2f}
+    - ⚠️ **ریسک سالانه (انحراف معیار):** {risk_for_display:.2%}  
+    - 🧠 **نسبت شارپ:** {sharpe_for_display:.2f}
     """)
     for i, name in enumerate(asset_names):
         st.markdown(f"🔹 **وزن {name}:** {best_weights[i]*100:.2f}%")
@@ -121,25 +141,13 @@ if uploaded_files:
         color_continuous_scale='Viridis'
     )
     fig.add_trace(go.Scatter(
-        x=[best_risk*100],
-        y=[best_return*100],
+        x=[risk_for_display * 100],
+        y=[best_return * 100],
         mode='markers',
         marker=dict(color='red', size=12, symbol='star'),
         name='Optimal Portfolio'
     ))
     st.plotly_chart(fig)
-
-    # استراتژی بیمه با آپشن پوت
-    st.subheader("🛡 مدیریت ریسک با آپشن پوت (استراتژی بیمه‌ای)")
-    target_loss = st.slider("حداکثر زیان قابل تحمل (٪ در سال)", 5.0, 50.0, 30.0)
-
-    if best_risk > target_loss / 100:
-        insurance_needed = (best_risk - target_loss / 100) / best_risk
-        adjusted_risk = best_risk * (1 - insurance_needed)
-        st.warning(f"برای محدود کردن زیان به {target_loss:.0f}٪، باید {insurance_needed*100:.2f}% پرتفو را بیمه کنید.")
-        st.info(f"✅ ریسک تعدیل‌شده پرتفو پس از بیمه: {adjusted_risk:.2%}")
-    else:
-        st.success("✅ ریسک پرتفو در محدوده قابل‌قبول است. نیازی به بیمه نیست.")
 
 else:
     st.warning("لطفاً فایل‌های CSV شامل ستون‌های Date و Price را آپلود کنید.")
