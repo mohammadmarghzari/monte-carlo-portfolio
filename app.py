@@ -98,16 +98,15 @@ if uploaded_files:
     if use_put_option:
         st.subheader("ورودی‌های آپشن برای هر دارایی")
         total_portfolio_value = 0.0
-        # ورودی‌ها برای هر دارایی با کلیدهای یکتا
         for asset in asset_names:
             st.markdown(f"### دارایی: {asset}")
             base_amounts[asset] = st.number_input(
                 f"مقدار دارایی پایه خریداری شده - {asset}",
-                min_value=0.0, value=0.0, step=0.01, key=f"base_amount_{asset}"
+                min_value=0.0, value=0.0, step=0.0001, format="%.6f", key=f"base_amount_{asset}"
             )
             base_prices[asset] = st.number_input(
                 f"قیمت خرید دارایی پایه (دلار) - {asset}",
-                min_value=0.0, value=1000.0, step=0.01, format="%.6f", key=f"base_price_{asset}"
+                min_value=0.0, value=1000.0, step=0.0001, format="%.6f", key=f"base_price_{asset}"
             )
             option_contracts[asset] = st.number_input(
                 f"تعداد قرارداد آپشن - {asset}",
@@ -115,16 +114,14 @@ if uploaded_files:
             )
             option_strikes[asset] = st.number_input(
                 f"قیمت اعمال (Strike Price) آپشن - {asset}",
-                min_value=0.0, value=1000.0, step=0.01, format="%.6f", key=f"option_strike_{asset}"
+                min_value=0.0, value=1000.0, step=0.0001, format="%.6f", key=f"option_strike_{asset}"
             )
             option_premiums[asset] = st.number_input(
                 f"قیمت آپشن (Premium) - {asset}",
-                min_value=0.0, value=50.0, step=0.01, format="%.6f", key=f"option_premium_{asset}"
+                min_value=0.0, value=50.0, step=0.0001, format="%.6f", key=f"option_premium_{asset}"
             )
-
             total_portfolio_value += base_amounts[asset] * base_prices[asset]
 
-        # محاسبه سود/زیان آپشن‌ها و درصد کل پرتفو
         total_option_pnl = 0.0
         for asset in asset_names:
             pnl = max(0, option_strikes[asset] - base_prices[asset]) * option_contracts[asset] - option_premiums[asset] * option_contracts[asset]
@@ -132,19 +129,16 @@ if uploaded_files:
             if total_portfolio_value > 0:
                 option_pnl_percent[asset] = pnl / total_portfolio_value
             total_option_pnl += pnl
-
             st.write(f"سود/زیان آپشن {asset}: {pnl:.2f} دلار - درصد پرتفو: {option_pnl_percent[asset]*100:.2f}%")
 
-        # درصد تقریبی پوشش بیمه کل پرتفو
         real_coverage_percent = sum(
             min((option_contracts[asset] * option_strikes[asset]) / (base_amounts[asset] * base_prices[asset] + 1e-10), 1.0)
             for asset in asset_names if base_amounts[asset] > 0
         ) / max(len(asset_names), 1)
         st.write(f"درصد تقریبی پوشش بیمه کل پرتفو: {real_coverage_percent*100:.2f}%")
 
-        # تعدیل بازده و کوواریانس
         adjusted_mean_returns = mean_returns + np.array([option_pnl_percent.get(asset, 0) for asset in asset_names])
-        adjusted_cov = cov_matrix * (1 - real_coverage_percent)**2
+        adjusted_cov = cov_matrix * (1 - real_coverage_percent) ** 2
 
         effective_std = asset_std_devs * (1 - real_coverage_percent)
         preference_weights = effective_std / asset_std_devs
@@ -192,8 +186,8 @@ if uploaded_files:
             st.markdown(f"🔹 وزن {name}: {best_weights[i]*100:.2f}%")
 
         fig = px.scatter(
-            x=results[1]*100,
-            y=results[0]*100,
+            x=results[1] * 100,
+            y=results[0] * 100,
             color=results[2],
             labels={'x': 'Risk (%)', 'y': 'Expected Return (%)'},
             title="Efficient Frontier - Monte Carlo",
@@ -239,16 +233,16 @@ if uploaded_files:
             st.markdown(f"🔸 وزن {name}: {r_weights[i]*100:.2f}%")
 
         fig = px.scatter(
-            x=results[1]*100,
-            y=results[0]*100,
+            x=results[1] * 100,
+            y=results[0] * 100,
             color=results[2],
             labels={'x': 'Risk (%)', 'y': 'Expected Return (%)'},
             title="Efficient Frontier - MPT",
             color_continuous_scale='Turbo'
         )
         fig.add_trace(go.Scatter(
-            x=[r_risk*100],
-            y=[r_return*100],
+            x=[r_risk * 100],
+            y=[r_return * 100],
             mode='markers',
             marker=dict(color='red', size=12, symbol='star'),
             name='Target Portfolio'
