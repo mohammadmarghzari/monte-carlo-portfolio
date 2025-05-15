@@ -19,7 +19,6 @@ period = st.sidebar.selectbox("بازه تحلیل:", ['روزانه', 'ماها
 resample_rule, annual_factor = {'روزانه': ('D', 252), 'ماهانه': ('M', 12), 'سه‌ماهه': ('Q', 4)}[period]
 
 use_option = st.sidebar.checkbox("📉 استفاده از بیمه با آپشن پوت")
-target_risk = st.sidebar.slider("🎯 ریسک هدف (سالانه)", 5.0, 50.0, 25.0) / 100
 
 if uploaded_files:
     prices_df = pd.DataFrame()
@@ -142,7 +141,8 @@ if uploaded_files:
         results[2, i] = sharpe
         results[3:, i] = weights
 
-    idx = np.argmin(np.abs(results[1] - target_risk))
+    # انتخاب پرتفو با حداکثر نسبت شارپ به جای ریسک هدف
+    idx = np.argmax(results[2])
     best_ret, best_risk, best_sharpe = results[0, idx], results[1, idx], results[2, idx]
     best_weights = results[3:, idx]
 
@@ -166,7 +166,7 @@ if uploaded_files:
         y=[best_ret * 100],
         mode="markers",
         marker=dict(color="red", size=12, symbol="star"),
-        name="پرتفو هدف"
+        name="پرتفو بهینه"
     ))
     st.plotly_chart(fig)
 
