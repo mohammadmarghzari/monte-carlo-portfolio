@@ -30,111 +30,97 @@ if uploaded_files:
         name = file.name.split('.')[0]
         df = pd.read_csv(file)
 
-        # پاکسازی نام ستون‌ها از کوتیشن و فاصله اضافی
+        # پاکسازی نام ستون‌ها (حذف دابل‌کوتیشن و فاصله اضافی)
         df.columns = df.columns.str.strip().str.replace('"', '').str.replace("'", '')
 
         if 'Date' not in df.columns or 'Price' not in df.columns:
             st.error(f"فایل {name} باید شامل ستون‌های 'Date' و 'Price' باشد. ستون‌های یافت‌شده: {df.columns.tolist()}")
             continue
 
-        # فقط ستون‌های Date و Price را انتخاب کن
-        df = df.loc[:, ['Date', 'Price']].copy()
-
-        # حذف ردیف‌هایی که مقدار خالی در Date یا Price دارند
+        df = df[['Date', 'Price']].copy()
         df.dropna(subset=['Date', 'Price'], inplace=True)
-
-        # تبدیل Date به datetime
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-
-        # حذف ردیف‌هایی که تاریخ نامعتبر دارند
+        # Parsing dates with specific format MM/DD/YYYY
+        df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y', errors='coerce')
         df = df.dropna(subset=['Date'])
-
-        # تنظیم Date به ایندکس
         df.set_index('Date', inplace=True)
-
-        # بررسی تعداد ستون‌ها بعد از پاکسازی
-        st.write(f"Columns after cleaning for {name}: {df.columns.tolist()}")
-
-        if df.shape[1] != 1:
-            st.error(f"خطا: تعداد ستون‌های باقی‌مانده برای {name} بیشتر از ۱ است.")
-            continue
-
-        # تغییر نام ستون به نام دارایی
+        # Rename the Price column to the asset name
         df.columns = [name]
-
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
         asset_names.append(name)
 
-    returns = prices_df.resample(resample_rule).last().pct_change().dropna()
-    mean_returns = returns.mean() * annual_factor
-    cov_matrix = returns.cov() * annual_factor
-    asset_std = np.sqrt(np.diag(cov_matrix))
-
-    base_amounts, base_prices, option_contracts, option_strikes, option_premiums = {}, {}, {}, {}, {}
-    coverage = {}
-
-    if use_put_option:
-        st.header("🛡 تنظیمات بیمه آپشن برای هر دارایی")
-        for asset in asset_names:
-            st.markdown(f"#### 📌 {asset}")
-            base_amounts[asset] = st.number_input(f"مقدار دارایی پایه - {asset}", 0.0, 1e8, 1.0, step=0.01, format="%.6f", key=f"amount_{asset}")
-            base_prices[asset] = st.number_input(f"قیمت خرید دارایی - {asset}", 0.0, 1e6, 1000.0, step=0.01, format="%.6f", key=f"price_{asset}")
-            option_contracts[asset] = st.number_input(f"تعداد قرارداد آپشن - {asset}", 0.0, 1e6, 0.0, step=0.0001, format="%.6f", key=f"contracts_{asset}")
-            option_strikes[asset] = st.number_input(f"قیمت اعمال - {asset}", 0.0, 1e6, 1000.0, step=0.01, format="%.6f", key=f"strike_{asset}")
-            option_premiums[asset] = st.number_input(f"قیمت آپشن - {asset}", 0.0, 1e6, 50.0, step=0.01, format="%.6f", key=f"premium_{asset}")
-
-            insured_value = option_contracts[asset] * option_strikes[asset]
-            base_value = base_amounts[asset] * base_prices[asset] + 1e-10
-            coverage[asset] = min(insured_value / base_value, 1.0)
-
-        adj_returns = mean_returns.copy()
-        for asset in asset_names:
-            pnl = max(0, option_strikes[asset] - base_prices[asset]) * option_contracts[asset] - option_premiums[asset] * option_contracts[asset]
-            pnl_percent = pnl / (base_amounts[asset] * base_prices[asset] + 1e-10)
-            adj_returns[asset] += pnl_percent
-
-        adj_cov = cov_matrix.copy()
-        for i, a1 in enumerate(asset_names):
-            for j, a2 in enumerate(asset_names):
-                c1 = coverage.get(a1, 0)
-                c2 = coverage.get(a2, 0)
-                adj_cov.iloc[i, j] *= (1 - (c1 + c2) / 2) ** 1.5
+    if prices_df.empty:
+        st.error("هیچ داده معتبری از فایل‌ها بارگذاری نشد. لطفاً فایل‌های CSV معتبر آپلود کنید.")
     else:
-        adj_returns = mean_returns
-        adj_cov = cov_matrix
+        returns = prices_df.resample(resample_rule).last().pct_change().dropna()
+        mean_returns = returns.mean() * annual_factor
+        cov_matrix = returns.cov() * annual_factor
+        asset_std = np.sqrt(np.diag(cov_matrix))
 
-    st.header("📊 نتایج پرتفو")
-    n = 10000 if analysis_mode == "مونت‌کارلو (MC)" else 500
-    results = np.zeros((3 + len(asset_names), n))
+        base_amounts, base_prices, option_contracts, option_strikes, option_premiums = {}, {}, {}, {}, {}
+        coverage = {}
 
-    for i in range(n):
-        weights = np.random.random(len(asset_names))
-        weights /= np.sum(weights)
-        port_return = np.dot(weights, adj_returns)
-        port_std = np.sqrt(np.dot(weights.T, np.dot(adj_cov, weights)))
-        sharpe = port_return / port_std if port_std > 0 else 0
-        results[0, i] = port_return
-        results[1, i] = port_std
-        results[2, i] = sharpe
-        results[3:, i] = weights
+        if use_put_option:
+            st.header("🛡 تنظیمات بیمه آپشن برای هر دارایی")
+            for asset in asset_names:
+                st.markdown(f"#### 📌 {asset}")
+                base_amounts[asset] = st.number_input(f"مقدار دارایی پایه - {asset}", 0.0, 1e8, 1.0, step=0.01, format="%.6f", key=f"amount_{asset}")
+                base_prices[asset] = st.number_input(f"قیمت خرید دارایی - {asset}", 0.0, 1e6, 1000.0, step=0.01, format="%.6f", key=f"price_{asset}")
+                option_contracts[asset] = st.number_input(f"تعداد قرارداد آپشن - {asset}", 0.0, 1e6, 0.0, step=0.0001, format="%.6f", key=f"contracts_{asset}")
+                option_strikes[asset] = st.number_input(f"قیمت اعمال - {asset}", 0.0, 1e6, 1000.0, step=0.01, format="%.6f", key=f"strike_{asset}")
+                option_premiums[asset] = st.number_input(f"قیمت آپشن - {asset}", 0.0, 1e6, 50.0, step=0.01, format="%.6f", key=f"premium_{asset}")
 
-    idx_best = np.argmin(np.abs(results[1] - target_risk_slider))
-    ret, risk, sharpe = results[0, idx_best], results[1, idx_best], results[2, idx_best]
-    weights = results[3:, idx_best]
+                insured_value = option_contracts[asset] * option_strikes[asset]
+                base_value = base_amounts[asset] * base_prices[asset] + 1e-10
+                coverage[asset] = min(insured_value / base_value, 1.0)
 
-    st.markdown(f"""
-    - ✅ بازده مورد انتظار: {ret:.2%}
-    - ⚠️ ریسک سالانه: {risk:.2%}
-    - 🧠 نسبت شارپ: {sharpe:.2f}
-    """)
-    for i, name in enumerate(asset_names):
-        st.markdown(f"🔸 وزن {name}: {weights[i]*100:.2f}%")
+            adj_returns = mean_returns.copy()
+            for asset in asset_names:
+                pnl = max(0, option_strikes[asset] - base_prices[asset]) * option_contracts[asset] - option_premiums[asset] * option_contracts[asset]
+                pnl_percent = pnl / (base_amounts[asset] * base_prices[asset] + 1e-10)
+                adj_returns[asset] += pnl_percent
 
-    fig = px.scatter(x=results[1]*100, y=results[0]*100, color=results[2],
-        labels={'x': 'Risk (%)', 'y': 'Expected Return (%)'},
-        title=f"Efficient Frontier - {analysis_mode}", color_continuous_scale='Viridis')
-    fig.add_trace(go.Scatter(x=[risk*100], y=[ret*100], mode='markers', marker=dict(color='red', size=12, symbol='star'), name='Target'))
-    st.plotly_chart(fig)
+            adj_cov = cov_matrix.copy()
+            for i, a1 in enumerate(asset_names):
+                for j, a2 in enumerate(asset_names):
+                    c1 = coverage.get(a1, 0)
+                    c2 = coverage.get(a2, 0)
+                    adj_cov.iloc[i, j] *= (1 - (c1 + c2) / 2) ** 1.5
+        else:
+            adj_returns = mean_returns
+            adj_cov = cov_matrix
+
+        st.header("📊 نتایج پرتفو")
+        n = 10000 if analysis_mode == "مونت‌کارلو (MC)" else 500
+        results = np.zeros((3 + len(asset_names), n))
+
+        for i in range(n):
+            weights = np.random.random(len(asset_names))
+            weights /= np.sum(weights)
+            port_return = np.dot(weights, adj_returns)
+            port_std = np.sqrt(np.dot(weights.T, np.dot(adj_cov, weights)))
+            sharpe = port_return / port_std if port_std > 0 else 0
+            results[0, i] = port_return
+            results[1, i] = port_std
+            results[2, i] = sharpe
+            results[3:, i] = weights
+
+        idx_best = np.argmin(np.abs(results[1] - target_risk_slider))
+        ret, risk, sharpe = results[0, idx_best], results[1, idx_best], results[2, idx_best]
+        weights = results[3:, idx_best]
+
+        st.markdown(f"""
+        - ✅ بازده مورد انتظار: {ret:.2%}
+        - ⚠️ ریسک سالانه: {risk:.2%}
+        - 🧠 نسبت شارپ: {sharpe:.2f}
+        """)
+        for i, name in enumerate(asset_names):
+            st.markdown(f"🔸 وزن {name}: {weights[i]*100:.2f}%")
+
+        fig = px.scatter(x=results[1]*100, y=results[0]*100, color=results[2],
+            labels={'x': 'Risk (%)', 'y': 'Expected Return (%)'},
+            title=f"Efficient Frontier - {analysis_mode}", color_continuous_scale='Viridis')
+        fig.add_trace(go.Scatter(x=[risk*100], y=[ret*100], mode='markers', marker=dict(color='red', size=12, symbol='star'), name='Target'))
+        st.plotly_chart(fig)
 
 else:
     st.warning("لطفاً فایل‌های CSV شامل ستون‌های Date و Price را آپلود کنید.")
