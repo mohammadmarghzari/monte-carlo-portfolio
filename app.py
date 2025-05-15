@@ -87,6 +87,7 @@ if uploaded_files:
         
         # تبدیل تاریخ
         try:
+            # فرمت تاریخ نمونه: '03/08/2025' (MM/DD/YYYY)
             df[date_col] = pd.to_datetime(df[date_col], errors='coerce', format='%m/%d/%Y')
             invalid_dates = df[df[date_col].isna()]
             if not invalid_dates.empty:
