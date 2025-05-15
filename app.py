@@ -18,7 +18,7 @@ def read_csv_file(file):
             sep=',',
             decimal='.',
             thousands=None,
-            na_values=['', 'NA', 'N/A', 'null'],
+            na_values=['', 'NA', 'N/A', 'null', '-'],
             skipinitialspace=True,
             on_bad_lines='warn'
         )
@@ -84,15 +84,20 @@ if uploaded_files:
                 key=f"date_col_{name}"
             )
         
-        # تبدیل تاریخ با انعطاف بیشتر
+        # تبدیل تاریخ با فرمت مشخص
         try:
-            df[date_col] = pd.to_datetime(df[date_col], errors='coerce', dayfirst=True)
-            if df[date_col].isna().all():
-                st.error(f"❌ تمام مقادیر ستون '{date_col}' در فایل '{name}' نامعتبر هستند.")
-                continue
-            if df[date_col].isna().any():
-                st.warning(f"⚠️ {df[date_col].isna().sum()} مقدار تاریخ نامعتبر در فایل '{name}' یافت شد. ردیف‌های مشکل‌دار حذف می‌شوند.")
+            # فرمت تاریخ نمونه: '03/08/2025' (MM/DD/YYYY)
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce', format='%m/%d/%Y')
+            invalid_dates = df[df[date_col].isna()]
+            if not invalid_dates.empty:
+                st.warning(f"⚠️ {len(invalid_dates)} مقدار تاریخ نامعتبر در فایل '{name}' یافت شد:")
+                st.write("نمونه تاریخ‌های نامعتبر:")
+                st.dataframe(invalid_dates[[date_col]].head())
                 df = df.dropna(subset=[date_col])
+                st.info(f"ردیف‌های مشکل‌دار حذف شدند. {len(df)} ردیف باقی ماند.")
+            if df.empty:
+                st.error(f"❌ هیچ تاریخ معتبری در فایل '{name}' باقی نماند.")
+                continue
         except Exception as e:
             st.error(f"❌ خطا در تبدیل ستون '{date_col}' به تاریخ: {e}")
             continue
@@ -108,13 +113,19 @@ if uploaded_files:
             )
         
         # پاکسازی داده‌های قیمت
+        # حذف کاما و تبدیل به عددی
+        df[close_col] = df[close_col].astype(str).str.replace(',', '', regex=False)
         df[close_col] = pd.to_numeric(df[close_col], errors='coerce')
-        if df[close_col].isna().all():
-            st.error(f"❌ تمام مقادیر ستون '{close_col}' در فایل '{name}' نامعتبر هستند.")
-            continue
-        if df[close_col].isna().any():
-            st.warning(f"⚠️ {df[close_col].isna().sum()} مقدار نامعتبر در ستون '{close_col}' فایل '{name}' یافت شد. ردیف‌های مشکل‌دار حذف می‌شوند.")
+        invalid_prices = df[df[close_col].isna()]
+        if not invalid_prices.empty:
+            st.warning(f"⚠️ {len(invalid_prices)} مقدار نامعتبر در ستون '{close_col}' فایل '{name}' یافت شد:")
+            st.write("نمونه مقادیر نامعتبر:")
+            st.dataframe(invalid_prices[[date_col, close_col]].head())
             df = df.dropna(subset=[close_col])
+            st.info(f"ردیف‌های مشکل‌دار حذف شدند. {len(df)} ردیف باقی ماند.")
+        if df.empty:
+            st.error(f"❌ هیچ قیمت معتبری در فایل '{name}' باقی نماند.")
+            continue
         
         # تنظیم تاریخ به‌عنوان شاخص و ادغام داده‌ها
         df = df[[date_col, close_col]].set_index(date_col)
