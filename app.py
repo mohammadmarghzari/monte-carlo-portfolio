@@ -52,6 +52,7 @@ if uploaded_files:
             continue
 
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df['Price'] = df['Price'].astype(str).str.replace(',', '')
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
         df = df.dropna(subset=['Date', 'Price'])
         df = df[['Date', 'Price']].set_index('Date')
