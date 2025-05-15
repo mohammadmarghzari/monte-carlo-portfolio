@@ -27,6 +27,9 @@ if uploaded_files:
         name = file.name.split('.')[0]
         df = pd.read_csv(file)
 
+        # پاکسازی نام ستون‌ها از کوتیشن و فاصله اضافی
+        df.columns = df.columns.str.strip().str.replace('"', '')
+
         if 'Date' not in df.columns or 'Price' not in df.columns:
             st.error(f"فایل {name} باید شامل ستون‌های 'Date' و 'Price' باشد. ستون‌های یافت‌شده: {df.columns.tolist()}")
             continue
