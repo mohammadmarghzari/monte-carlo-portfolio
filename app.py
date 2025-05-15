@@ -30,6 +30,17 @@ def read_csv_file(file):
         st.error(f"خطا در خواندن فایل {file.name}: {e}")
         return None
 
+# تابع یافتن ستون تاریخ
+def find_date_column(df, file_name):
+    possible_cols = [
+        col for col in df.columns 
+        if any(key in col.lower() for key in ['date', 'time', 'timestamp'])
+    ]
+    if possible_cols:
+        return possible_cols[0]
+    st.warning(f"ستونی مشابه 'Date' در فایل {file_name} یافت نشد.")
+    return None
+
 # تابع یافتن ستون قیمت
 def find_price_column(df, file_name):
     possible_cols = [
@@ -64,14 +75,26 @@ if uploaded_files:
         st.write(f"📄 فایل: {name} - ستون‌ها: {list(df.columns)}")
 
         # یافتن ستون تاریخ
-        possible_date_cols = [col for col in df.columns if 'date' in col.lower()]
-        if not possible_date_cols:
-            st.error(f"❌ فایل '{name}' فاقد ستون تاریخ است.")
-            continue
-        date_col = possible_date_cols[0]
-        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-        if df[date_col].isna().any():
-            st.error(f"❌ برخی مقادیر تاریخ در فایل '{name}' نامعتبر هستند.")
+        date_col = find_date_column(df, name)
+        if not date_col:
+            st.write("لطفاً ستون تاریخ را به‌صورت دستی انتخاب کنید:")
+            date_col = st.selectbox(
+                f"انتخاب ستون تاریخ برای {name}",
+                options=df.columns,
+                key=f"date_col_{name}"
+            )
+        
+        # تبدیل تاریخ با انعطاف بیشتر
+        try:
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce', dayfirst=True)
+            if df[date_col].isna().all():
+                st.error(f"❌ تمام مقادیر ستون '{date_col}' در فایل '{name}' نامعتبر هستند.")
+                continue
+            if df[date_col].isna().any():
+                st.warning(f"⚠️ {df[date_col].isna().sum()} مقدار تاریخ نامعتبر در فایل '{name}' یافت شد. ردیف‌های مشکل‌دار حذف می‌شوند.")
+                df = df.dropna(subset=[date_col])
+        except Exception as e:
+            st.error(f"❌ خطا در تبدیل ستون '{date_col}' به تاریخ: {e}")
             continue
 
         # یافتن یا انتخاب ستون قیمت
@@ -86,8 +109,11 @@ if uploaded_files:
         
         # پاکسازی داده‌های قیمت
         df[close_col] = pd.to_numeric(df[close_col], errors='coerce')
+        if df[close_col].isna().all():
+            st.error(f"❌ تمام مقادیر ستون '{close_col}' در فایل '{name}' نامعتبر هستند.")
+            continue
         if df[close_col].isna().any():
-            st.warning(f"⚠️ {df[close_col].isna().sum()} مقدار نامعتبر در ستون '{close_col}' فایل '{name}' یافت شد.")
+            st.warning(f"⚠️ {df[close_col].isna().sum()} مقدار نامعتبر در ستون '{close_col}' فایل '{name}' یافت شد. ردیف‌های مشکل‌دار حذف می‌شوند.")
             df = df.dropna(subset=[close_col])
         
         # تنظیم تاریخ به‌عنوان شاخص و ادغام داده‌ها
@@ -98,12 +124,15 @@ if uploaded_files:
             date_column = date_col
         else:
             prices_df = prices_df.join(df, how='inner')
+            if prices_df.empty:
+                st.error(f"❌ هیچ تاریخ مشترکی بین فایل‌ها یافت نشد. لطفاً تاریخ‌ها را بررسی کنید.")
+                st.stop()
 
         asset_names.append(name)
-        st.success(f"✅ ستون انتخاب‌شده برای {name}: {close_col}")
+        st.success(f"✅ ستون‌های انتخاب‌شده برای {name}: تاریخ='{date_col}'، قیمت='{close_col}'")
 
     if prices_df.empty or len(asset_names) < 1:
-        st.error("❌ هیچ داده معتبری از فایل‌ها استخراج نشد.")
+        st.error("❌ هیچ داده معتبری از فایل‌ها استخراج نشد. لطفاً فایل‌ها و ستون‌ها را بررسی کنید.")
         st.stop()
 
     # محاسبه بازده ماهانه
