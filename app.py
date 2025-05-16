@@ -31,8 +31,10 @@ if uploaded_files:
 
         if 'price' in df.columns:
             prices_df[name] = df['price']
+        elif 'Close' in df.columns:
+            prices_df[name] = df['Close']
         else:
-            st.error(f"❌ ستون 'price' در فایل {name} پیدا نشد.")
+            st.error(f"❌ ستون 'price' یا 'Close' در فایل {name} پیدا نشد.")
             st.stop()
 
     # ادامه کد تحلیل پرتفو (شبیه‌سازی مونت‌کارلو و غیره) ...
