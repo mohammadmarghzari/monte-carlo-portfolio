@@ -56,7 +56,7 @@ if uploaded_files:
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df.dropna(subset=['Date', 'Price'])
         df = df[['Date', 'Price']].set_index('Date')
-        df.columns = [name]
+        df.columns = [eth]
 
         if prices_df.empty:
             prices_df = df
