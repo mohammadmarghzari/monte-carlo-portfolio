@@ -28,12 +28,10 @@ if uploaded_files:
         df = pd.read_csv(file)
         df.columns = df.columns.str.strip()
 
-        if 'Adj Close' in df.columns:
-            prices_df[name] = df['Adj Close']
-        elif 'Close' in df.columns:
+        if 'Close' in df.columns:
             prices_df[name] = df['Close']
         else:
-            st.error(f"❌ ستون 'Adj Close' یا 'Close' در فایل {name} پیدا نشد.")
+            st.error(f"❌ ستون 'Close' در فایل {name} پیدا نشد.")
             st.stop()
 
     returns = prices_df.pct_change().dropna()
@@ -41,7 +39,6 @@ if uploaded_files:
     cov_matrix = returns.cov() * 252
     n_assets = len(asset_names)
 
-    # شبیه‌سازی مونت‌کارلو با محدودیت وزن
     np.random.seed(42)
     results = np.zeros((3 + n_assets, n_portfolios))
     count = 0
