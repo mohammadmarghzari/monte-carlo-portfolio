@@ -27,24 +27,23 @@ if uploaded_files:
         st.write(f"اطلاعات فایل {name}:")
         st.text(s)
 
-        # نمایش دقیق ستون‌ها و کاراکترهای هر ستون (برای دیباگ)
-        st.write(f"ستون‌های فایل {name}:")
-        for col in df.columns:
-            st.write(f"'{col}': {list(col)}")
+        # نمایش ستون‌ها
+        st.write(f"ستون‌های فایل {name}: {df.columns.tolist()}")
 
         # پیدا کردن ستون قیمت (price یا close با حروف کوچک یا بزرگ)
-        if 'price' in df.columns.str.lower():
-            # پیدا کردن ستون price واقعی (حساس به حروف)
+        if any(col.lower() == 'price' for col in df.columns):
             price_col = [col for col in df.columns if col.lower() == 'price'][0]
-            prices_df[name] = df[price_col]
-        elif 'close' in df.columns.str.lower():
-            close_col = [col for col in df.columns if col.lower() == 'close'][0]
-            prices_df[name] = df[close_col]
+        elif any(col.lower() == 'close' for col in df.columns):
+            price_col = [col for col in df.columns if col.lower() == 'close'][0]
         else:
             st.error(f"❌ ستون 'price' یا 'Close' در فایل {name} پیدا نشد.")
             st.stop()
 
-    # ادامه کد تحلیل پرتفو (شبیه‌سازی مونت‌کارلو و غیره) ...
+        # تبدیل به عدد و حذف کاما
+        price_series = df[price_col].astype(str).str.replace(',', '').astype(float)
+        prices_df[name] = price_series
+
+    # ادامه کد تحلیل پرتفو
 
     returns = prices_df.pct_change().dropna()
     mean_returns = returns.mean() * 252
@@ -86,7 +85,6 @@ if uploaded_files:
     for i, name in enumerate(asset_names):
         st.markdown(f"🔹 **وزن {name}:** {best_weights[i]*100:.2f}٪")
 
-    # نمودار سود و زیان
     st.subheader("📈 نمودار سود/زیان پورتفو نسبت به تغییر قیمت‌ها")
 
     price_changes = np.linspace(-0.5, 0.5, 100)
