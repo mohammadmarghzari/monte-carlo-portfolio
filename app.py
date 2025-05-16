@@ -16,6 +16,12 @@ with st.sidebar.form("settings_form"):
         "چند فایل CSV آپلود کنید (هر دارایی یک فایل)",
         type=['csv'], accept_multiple_files=True)
     period = st.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
+    
+    # --- جدید: ریسک هدف پرتفوی ---
+    target_risk_input = st.number_input(
+        "⚖️ ریسک هدف پرتفوی سالیانه (%)",
+        min_value=0.0, max_value=100.0, value=25.0, step=0.1)
+    
     submitted = st.form_submit_button("اعمال تغییرات")
 
 if not submitted:
@@ -65,6 +71,15 @@ for file in uploaded_files:
     prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
     asset_names.append(name)
 
+# --- جدید: دریافت ریسک ثابت هر دارایی (با مقدار پیش‌فرض 20 درصد) ---
+st.sidebar.header("⚙️ تنظیمات ریسک دارایی‌ها (ثابت سالیانه)")
+fixed_risks = {}
+for name in asset_names:
+    fixed_risks[name] = st.sidebar.number_input(
+        f"ریسک سالیانه ثابت برای {name} (%)", 
+        min_value=0.0, max_value=100.0, value=20.0, step=0.1, key=f"risk_{name}"
+    )
+
 # ---------- تنظیمات بیمه به صورت تب جداگانه در سایدبار ----------
 with st.sidebar.expander("⚙️ تنظیمات بیمه (Married Put)"):
     for name in asset_names:
@@ -94,19 +109,24 @@ resampled_prices = prices_df.resample(resample_rule).last().dropna()
 returns = resampled_prices.pct_change().dropna()
 mean_returns = returns.mean() * annual_factor
 cov_matrix = returns.cov() * annual_factor
-std_devs = np.sqrt(np.diag(cov_matrix))
 
-adjusted_cov = cov_matrix.copy()
+# --- جدید: بجای محاسبه ریسک واقعی، ریسک هر دارایی را ثابت می‌گیریم ---
+# برای این کار، ماتریس کوواریانس رو میسازیم با فرض استقلال دارایی‌ها
+fixed_std_devs = np.array([fixed_risks[name] / 100 for name in asset_names])
+adjusted_cov = np.diag(fixed_std_devs**2)
+
+# اگر بخواهی می‌تونی کوواریانس واقعی رو در ادامه هم دخیل کنی (مثلاً میانگین بگیری)
+# اما در اینجا فقط ریسک ثابت را مدنظر گرفتیم
+
 preference_weights = []
 
 for i, name in enumerate(asset_names):
     if name in insured_assets:
         risk_scale = 1 - insured_assets[name]['loss_percent'] / 100
-        adjusted_cov.iloc[i, :] *= risk_scale
-        adjusted_cov.iloc[:, i] *= risk_scale
-        preference_weights.append(1 / (std_devs[i] * risk_scale))
+        adjusted_cov[i, i] *= risk_scale**2  # ریسک متناسب با بیمه کمتر می‌شود (توان ۲ برای واریانس)
+        preference_weights.append(1 / (fixed_std_devs[i] * risk_scale))
     else:
-        preference_weights.append(1 / std_devs[i])
+        preference_weights.append(1 / fixed_std_devs[i])
 
 preference_weights = np.array(preference_weights)
 preference_weights /= np.sum(preference_weights)
@@ -116,18 +136,20 @@ n_portfolios = 10000
 results = np.zeros((3 + len(asset_names), n_portfolios))
 np.random.seed(42)
 
+target_risk = target_risk_input / 100  # تبدیل به عدد بین 0 و 1
+
 for i in range(n_portfolios):
     weights = np.random.random(len(asset_names)) * preference_weights
     weights /= np.sum(weights)
     port_return = np.dot(weights, mean_returns)
     port_std = np.sqrt(np.dot(weights.T, np.dot(adjusted_cov, weights)))
-    sharpe_ratio = port_return / port_std
+    sharpe_ratio = port_return / port_std if port_std != 0 else 0
     results[0, i] = port_return
     results[1, i] = port_std
     results[2, i] = sharpe_ratio
     results[3:, i] = weights
 
-target_risk = 0.25
+# پیدا کردن پرتفوی با ریسک نزدیک به ریسک هدف
 best_idx = np.argmin(np.abs(results[1] - target_risk))
 best_return = results[0, best_idx]
 best_risk = results[1, best_idx]
@@ -177,4 +199,3 @@ else:
 # ---------- پیام وضعیت پایین صفحه ----------
 st.markdown("---")
 st.info("✅ تحلیل کامل انجام شد. برای تحلیل بهتر، داده‌ها را به‌روز نگه دارید.")
-
