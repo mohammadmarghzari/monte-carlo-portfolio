@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -19,7 +18,15 @@ if uploaded_files:
         df = pd.read_csv(file)
         name = file.name.split('.')[0]  # نام دارایی از نام فایل
         asset_names.append(name)
-        prices_df[name] = df['Adj Close']
+
+        # بررسی ستون‌های قابل قبول
+        if 'Adj Close' in df.columns:
+            prices_df[name] = df['Adj Close']
+        elif 'Close' in df.columns:
+            prices_df[name] = df['Close']
+        else:
+            st.error(f"❌ ستون 'Adj Close' یا 'Close' در فایل {name} پیدا نشد.")
+            st.stop()
 
     returns = prices_df.pct_change().dropna()
     mean_returns = returns.mean() * 252
@@ -77,7 +84,7 @@ if uploaded_files:
     plt.axhline(0, color='black', linestyle='--')
     plt.xlabel("درصد تغییر قیمت دارایی‌ها")
     plt.ylabel("درصد سود/زیان پرتفو")
-    plt.title("نمودار سود/زیان پورتفو")
+    plt.title("نمودار سود/زیان پرتفو")
     plt.grid(True)
     st.pyplot(plt)
 
