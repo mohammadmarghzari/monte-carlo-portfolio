@@ -16,23 +16,30 @@ if uploaded_files:
     prices_df = pd.DataFrame()
     for file, name in zip(uploaded_files, asset_names):
         df = pd.read_csv(file)
-        
+
+        # پاکسازی ستون‌ها: حذف فاصله و کاراکترهای اضافی
+        df.columns = df.columns.str.strip().str.replace(r'\s+', '', regex=True)
+
         # نمایش info فایل
         buffer = StringIO()
         df.info(buf=buffer)
         s = buffer.getvalue()
-        st.write(f"اطلاعات فایل {name}:\n")
+        st.write(f"اطلاعات فایل {name}:")
         st.text(s)
-        
-        # نمایش ستون‌ها
-        st.write(f"ستون‌های فایل {name}: {df.columns.tolist()}")
-        
-        df.columns = df.columns.str.strip()
 
-        if 'price' in df.columns:
-            prices_df[name] = df['price']
-        elif 'Close' in df.columns:
-            prices_df[name] = df['Close']
+        # نمایش دقیق ستون‌ها و کاراکترهای هر ستون (برای دیباگ)
+        st.write(f"ستون‌های فایل {name}:")
+        for col in df.columns:
+            st.write(f"'{col}': {list(col)}")
+
+        # پیدا کردن ستون قیمت (price یا close با حروف کوچک یا بزرگ)
+        if 'price' in df.columns.str.lower():
+            # پیدا کردن ستون price واقعی (حساس به حروف)
+            price_col = [col for col in df.columns if col.lower() == 'price'][0]
+            prices_df[name] = df[price_col]
+        elif 'close' in df.columns.str.lower():
+            close_col = [col for col in df.columns if col.lower() == 'close'][0]
+            prices_df[name] = df[close_col]
         else:
             st.error(f"❌ ستون 'price' یا 'Close' در فایل {name} پیدا نشد.")
             st.stop()
