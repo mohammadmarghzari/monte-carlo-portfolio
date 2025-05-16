@@ -29,7 +29,7 @@ if uploaded_files:
         
         df.columns = df.columns.str.strip()
 
-        if 'Close' in df.columns:
+        if 'price' in df.columns:
             prices_df[name] = df['price']
         else:
             st.error(f"❌ ستون 'Close' در فایل {name} پیدا نشد.")
