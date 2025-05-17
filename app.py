@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.optimize import minimize
 
 st.set_page_config(layout="wide")
 st.title("📊 ابزار تحلیل پرتفو با بیمه اختیار فروش (Married Put)")
@@ -31,17 +30,26 @@ if uploaded_files:
         df = df.dropna(subset=['Date'])
         df.set_index('Date', inplace=True)
 
-        # انتخاب ستون قیمت
+        # لیست نام‌های ممکن ستون قیمت
+        possible_price_cols = ['Adj Close', 'Adj_Close', 'Close', 'Price', 'Last', 'Close Price']
+
         price_col = None
-        if 'Adj Close' in df.columns:
-            price_col = 'Adj Close'
-        elif 'Close' in df.columns:
-            price_col = 'Close'
-        else:
-            numeric_cols = df.select_dtypes(include='number').columns
+        for col in possible_price_cols:
+            if col in df.columns:
+                # اگر ستون متنی است، تلاش می‌کنیم به عددی تبدیل کنیم
+                if df[col].dtype == 'object':
+                    df[col] = pd.to_numeric(df[col].str.replace(',', '').str.strip(), errors='coerce')
+                # اگر تعداد داده‌های عددی کافی باشد، این ستون را انتخاب کن
+                if df[col].notnull().sum() > 0:
+                    price_col = col
+                    break
+
+        # اگر هیچکدام از ستون‌ها مناسب نبود، ستون عددی اول را انتخاب کن
+        if price_col is None:
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
             if len(numeric_cols) > 0:
                 price_col = numeric_cols[0]
-                st.warning(f"⚠️ در فایل {name} ستون 'Adj Close' یا 'Close' یافت نشد. ستون '{price_col}' استفاده شد.")
+                st.warning(f"⚠️ در فایل {name} ستون قیمت مشخص نشد، ستون '{price_col}' به عنوان قیمت انتخاب شد.")
             else:
                 st.error(f"❌ ستون عددی مناسب برای قیمت در فایل {name} یافت نشد.")
                 st.stop()
@@ -91,10 +99,7 @@ if uploaded_files:
         ax.set_xlabel("قیمت دارایی پایه")
         ax.set_ylabel("درصد سود/زیان")
         ax.set_title("نمودار سود/زیان Married Put")
-        ax.set_ylim(-100, 1200)  # تنظیم محور عمودی درصد از -100 تا 1200 درصد
         ax.legend()
         st.pyplot(fig)
 
     st.success("✅ تحلیل پرتفو با موفقیت انجام شد.")
-else:
-    st.info("لطفاً حداقل یک فایل CSV آپلود کنید تا تحلیل انجام شود.")
