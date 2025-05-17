@@ -29,16 +29,24 @@ if uploaded_files:
 
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df.dropna(subset=['Date'])
-
         df.set_index('Date', inplace=True)
 
+        # انتخاب ستون قیمت
+        price_col = None
         if 'Adj Close' in df.columns:
-            prices_df[name] = df['Adj Close']
+            price_col = 'Adj Close'
         elif 'Close' in df.columns:
-            prices_df[name] = df['Close']
+            price_col = 'Close'
         else:
-            st.error(f"❌ ستون 'Adj Close' یا 'Close' در فایل {name} پیدا نشد.")
-            st.stop()
+            numeric_cols = df.select_dtypes(include='number').columns
+            if len(numeric_cols) > 0:
+                price_col = numeric_cols[0]
+                st.warning(f"⚠️ در فایل {name} ستون 'Adj Close' یا 'Close' یافت نشد. ستون '{price_col}' استفاده شد.")
+            else:
+                st.error(f"❌ ستون عددی مناسب برای قیمت در فایل {name} یافت نشد.")
+                st.stop()
+
+        prices_df[name] = df[price_col]
 
     st.success("✅ فایل‌ها با موفقیت بارگذاری و پردازش شدند.")
 
@@ -83,7 +91,10 @@ if uploaded_files:
         ax.set_xlabel("قیمت دارایی پایه")
         ax.set_ylabel("درصد سود/زیان")
         ax.set_title("نمودار سود/زیان Married Put")
+        ax.set_ylim(-100, 1200)  # تنظیم محور عمودی درصد از -100 تا 1200 درصد
         ax.legend()
         st.pyplot(fig)
 
     st.success("✅ تحلیل پرتفو با موفقیت انجام شد.")
+else:
+    st.info("لطفاً حداقل یک فایل CSV آپلود کنید تا تحلیل انجام شود.")
