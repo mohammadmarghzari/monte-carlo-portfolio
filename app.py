@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-from scipy.stats import norm
 
 # پیکربندی صفحه
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو و Married Put", layout="wide")
@@ -86,23 +85,37 @@ if uploaded_files:
     returns = resampled_prices.pct_change().dropna()
 
     mean_returns = returns.mean() * annual_factor
-    cov_matrix = returns.cov() * annual_factor
 
-    std_devs = np.sqrt(np.diag(cov_matrix))
+    # 1. دریافت ریسک سالانه هر دارایی از کاربر (پیش‌فرض 20%)
+    st.sidebar.header("⚙️ تنظیمات ریسک دارایی‌ها")
+    asset_risks = {}
+    for name in asset_names:
+        risk = st.sidebar.number_input(
+            f"ریسک سالانه دارایی {name} (%)",
+            min_value=0.0, max_value=100.0, value=20.0, step=0.1, key=f"risk_{name}"
+        )
+        asset_risks[name] = risk / 100  # درصد به عدد اعشاری
 
-    adjusted_cov = cov_matrix.copy()
-    preference_weights = []
+    # 2. ریسک هدف پورتفو
+    target_risk = st.sidebar.number_input(
+        "ریسک هدف پورتفو (%)", min_value=0.0, max_value=100.0, value=25.0, step=0.1
+    ) / 100
 
-    for i, name in enumerate(asset_names):
-        if name in insured_assets:
-            risk_scale = 1 - insured_assets[name]['loss_percent'] / 100
-            adjusted_cov.iloc[i, :] *= risk_scale
-            adjusted_cov.iloc[:, i] *= risk_scale
-            preference_weights.append(1 / (std_devs[i] * risk_scale))
-        else:
-            preference_weights.append(1 / std_devs[i])
+    # 3. ساخت ماتریس کوواریانس با ریسک‌های ورودی و حفظ همبستگی واقعی
+    correlation_matrix = returns.corr()
+    cov_matrix_fixed = np.zeros_like(correlation_matrix.values)
+    for i, name_i in enumerate(asset_names):
+        for j, name_j in enumerate(asset_names):
+            if i == j:
+                cov_matrix_fixed[i, j] = asset_risks[name_i] ** 2
+            else:
+                cov_matrix_fixed[i, j] = correlation_matrix.iloc[i, j] * asset_risks[name_i] * asset_risks[name_j]
 
-    preference_weights = np.array(preference_weights)
+    # محاسبه انحراف معیار دارایی‌ها
+    std_devs = np.sqrt(np.diag(cov_matrix_fixed))
+
+    # وزن‌دهی ترجیحی (برعکس ریسک هر دارایی)
+    preference_weights = 1 / std_devs
     preference_weights /= np.sum(preference_weights)
 
     # شبیه‌سازی مونت‌کارلو
@@ -114,14 +127,14 @@ if uploaded_files:
         weights = np.random.random(len(asset_names)) * preference_weights
         weights /= np.sum(weights)
         port_return = np.dot(weights, mean_returns)
-        port_std = np.sqrt(np.dot(weights.T, np.dot(adjusted_cov, weights)))
-        sharpe_ratio = port_return / port_std
+        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix_fixed, weights)))
+        sharpe_ratio = port_return / port_std if port_std != 0 else 0
         results[0, i] = port_return
         results[1, i] = port_std
         results[2, i] = sharpe_ratio
         results[3:, i] = weights
 
-    target_risk = 0.25
+    # انتخاب بهترین پورتفو بر اساس ریسک هدف
     best_idx = np.argmin(np.abs(results[1] - target_risk))
     best_return = results[0, best_idx]
     best_risk = results[1, best_idx]
@@ -163,12 +176,10 @@ if uploaded_files:
 
         st.plotly_chart(fig2, key=f"married_put_chart_{name}")
 
-        if st.button(f"📷 ذخیره نمودار Married Put برای {name}", key=f"save_button_{name}"):
-            try:
-                img_bytes = fig2.to_image(format="png")
-                st.download_button(f"دانلود تصویر {name}", img_bytes, file_name=f"married_put_{name}.png", key=f"download_button_{name}")
-            except Exception as e:
-                st.error(f"❌ خطا در ذخیره تصویر: {e}")
+        if st.button(f"📷 ذخیره نمودار Married Put برای {name}", key=f"save_{name}"):
+            fig2.write_image(f"married_put_{name}.png")
+            st.success(f"نمودار Married Put برای {name} ذخیره شد.")
 
 else:
-    st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price را آپلود کنید.")
+    st.info("لطفاً حداقل یک فایل CSV آپلود کنید.")
+
