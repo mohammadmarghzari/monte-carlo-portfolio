@@ -4,7 +4,6 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from scipy.stats import norm
-import io
 
 # پیکربندی صفحه
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو و Married Put", layout="wide")
@@ -57,6 +56,7 @@ if uploaded_files:
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
         asset_names.append(name)
 
+        # تنظیمات بیمه در سایدبار برای هر دارایی
         st.sidebar.markdown(f"---\n### ⚙️ تنظیمات بیمه برای دارایی: `{name}`")
         insured = st.sidebar.checkbox(f"📌 فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
         if insured:
@@ -145,9 +145,9 @@ if uploaded_files:
     fig.add_trace(go.Scatter(x=[best_risk*100], y=[best_return*100],
                              mode='markers', marker=dict(size=12, color='red', symbol='star'),
                              name='پرتفوی بهینه'))
-    st.plotly_chart(fig)
+    st.plotly_chart(fig, key="monte_carlo_scatter")
 
-    # Married Put Chart
+    # نمودار Married Put برای هر دارایی بیمه شده
     for name, info in insured_assets.items():
         st.subheader(f"📉 نمودار سود و زیان استراتژی Married Put - {name}")
         x = np.linspace(info['spot'] * 0.5, info['spot'] * 1.5, 200)
@@ -160,13 +160,13 @@ if uploaded_files:
         fig2.add_trace(go.Scatter(x=x, y=asset_pnl, mode='lines', name='دارایی پایه', line=dict(dash='dot')))
         fig2.add_trace(go.Scatter(x=x, y=put_pnl, mode='lines', name='پوت', line=dict(dash='dot')))
         fig2.update_layout(title='نمودار سود و زیان', xaxis_title='قیمت دارایی در سررسید', yaxis_title='سود/زیان')
-        st.plotly_chart(fig2)
 
-        # ذخیره به تصویر
-        if st.button(f"📷 ذخیره نمودار Married Put برای {name}"):
+        st.plotly_chart(fig2, key=f"married_put_chart_{name}")
+
+        if st.button(f"📷 ذخیره نمودار Married Put برای {name}", key=f"save_button_{name}"):
             try:
                 img_bytes = fig2.to_image(format="png")
-                st.download_button("دانلود تصویر", img_bytes, file_name=f"married_put_{name}.png")
+                st.download_button(f"دانلود تصویر {name}", img_bytes, file_name=f"married_put_{name}.png", key=f"download_button_{name}")
             except Exception as e:
                 st.error(f"❌ خطا در ذخیره تصویر: {e}")
 
