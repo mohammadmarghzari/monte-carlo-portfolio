@@ -15,8 +15,8 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("📥 داده‌های نمونه و بارگذاری آنی")
 
 sample_files = {
-    "📊 BTC/USD نمونه 7 ساله (هفتگی)": "https://raw.githubusercontent.com/USERNAME/REPO/main/data/BTC_USD%207%20Years%20Weekly.csv",
-    "📉 ETH/USD نمونه 7 ساله (هفتگی)": "https://raw.githubusercontent.com/USERNAME/REPO/main/data/ETH_USD%207%20Years%20Weekly.csv"
+    "📊 BTC/USD نمونه 7 ساله (هفتگی)": "https://raw.githubusercontent.com/mohammadmarghzari/monte-carlo-portfolio/main/data/BTC_USD%207%20Years%20Weekly.csv",
+    "📉 ETH/USD نمونه 7 ساله (هفتگی)": "https://raw.githubusercontent.com/mohammadmarghzari/monte-carlo-portfolio/main/data/ETH_USD%207%20Years%20Weekly.csv"
 }
 
 loaded_samples = {}
