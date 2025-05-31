@@ -64,4 +64,62 @@ if not uploaded_files and loaded_samples:
         uploaded_files.append(csv_buffer)
         uploaded_files[-1].name = f"{name}.csv"
 
-# باقی کد بدون تغییر ادامه پیدا می‌کند (استفاده از uploaded_files)
+# باقی کد استفاده از uploaded_files:
+
+# تنظیمات بازه زمانی
+period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
+resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'شش‌ماهه': '2Q'}[period]
+annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}[period]
+
+if uploaded_files:
+    prices_df = pd.DataFrame()
+    asset_names = []
+    insured_assets = {}
+
+    for file in uploaded_files:
+        df = read_csv_file(file)
+        if df is None:
+            continue
+
+        name = file.name.split('.')[0]
+
+        if 'Date' not in df.columns or 'Price' not in df.columns:
+            st.warning(f"فایل {name} باید دارای ستون‌های 'Date' و 'Price' باشد.")
+            continue
+
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df['Price'] = df['Price'].astype(str).str.replace(',', '')
+        df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
+        df = df.dropna(subset=['Date', 'Price'])
+        df = df[['Date', 'Price']].set_index('Date')
+        df.columns = [name]
+
+        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
+        asset_names.append(name)
+
+        # تنظیمات بیمه در سایدبار برای هر دارایی
+        st.sidebar.markdown(f"---
+### ⚙️ تنظیمات بیمه برای دارایی: `{name}`")
+        insured = st.sidebar.checkbox(f"📌 فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
+        if insured:
+            loss_percent = st.sidebar.number_input(f"📉 درصد ضرر معامله پوت برای {name}", 0.0, 100.0, 30.0, step=0.01, key=f"loss_{name}")
+            strike = st.sidebar.number_input(f"🎯 قیمت اعمال پوت برای {name}", 0.0, 1e6, 100.0, step=0.01, key=f"strike_{name}")
+            premium = st.sidebar.number_input(f"💰 قیمت قرارداد پوت برای {name}", 0.0, 1e6, 5.0, step=0.01, key=f"premium_{name}")
+            amount = st.sidebar.number_input(f"📦 مقدار قرارداد برای {name}", 0.0, 1e6, 1.0, step=0.01, key=f"amount_{name}")
+            spot_price = st.sidebar.number_input(f"📌 قیمت فعلی دارایی پایه {name}", 0.0, 1e6, 100.0, step=0.01, key=f"spot_{name}")
+            asset_amount = st.sidebar.number_input(f"📦 مقدار دارایی پایه {name}", 0.0, 1e6, 1.0, step=0.01, key=f"base_{name}")
+            insured_assets[name] = {
+                'loss_percent': loss_percent,
+                'strike': strike,
+                'premium': premium,
+                'amount': amount,
+                'spot': spot_price,
+                'base': asset_amount
+            }
+
+    if prices_df.empty:
+        st.error("❌ داده‌ی معتبری برای تحلیل یافت نشد.")
+        st.stop()
+
+    st.subheader("🧪 پیش‌نمایش داده‌ها")
+    st.dataframe(prices_df.tail())
