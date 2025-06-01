@@ -30,23 +30,24 @@ for label, url in sample_files.items():
             if st.sidebar.button(f"📂 بارگذاری {label}", key=f"load_{label}"):
                 file_content = StringIO(response.text)
                 df = pd.read_csv(file_content)
+                # استانداردسازی نام ستون‌ها به حروف کوچک
                 df.columns = df.columns.str.strip().str.lower().str.replace('%', '')
-                df.rename(columns={'date': 'Date', 'price': 'Price'}, inplace=True)
+                df.rename(columns={'date': 'date', 'price': 'price'}, inplace=True)
                 loaded_samples[filename.split('.')[0]] = df
         else:
             st.sidebar.warning(f"❌ خطا در بارگیری فایل {label}")
     except Exception as e:
-        st.sidebar.warning(f"⚠️ مشکل در اتصال برای {label}")
+        st.sidebar.warning(f"⚠️ مشکل در اتصال برای {label}: {e}")
 
 # تابع خواندن فایل CSV
 def read_csv_file(file):
     try:
         df = pd.read_csv(file)
         df.columns = df.columns.str.strip().str.lower().str.replace('%', '')
-        df.rename(columns={'date': 'Date', 'price': 'Price'}, inplace=True)
+        df.rename(columns={'date': 'date', 'price': 'price'}, inplace=True)
         return df
     except Exception as e:
-        st.error(f"خطا در خواندن فایل {file.name}: {e}")
+        st.error(f"خطا در خواندن فایل {getattr(file, 'name', 'بدون نام')}: {e}")
         return None
 
 # بارگذاری فایل‌ها
@@ -61,10 +62,8 @@ if not uploaded_files and loaded_samples:
         csv_buffer = StringIO()
         df.to_csv(csv_buffer, index=False)
         csv_buffer.seek(0)
+        csv_buffer.name = f"{name}.csv"  # اضافه کردن ویژگی name به صورت دستی
         uploaded_files.append(csv_buffer)
-        uploaded_files[-1].name = f"{name}.csv"
-
-# باقی کد استفاده از uploaded_files:
 
 # تنظیمات بازه زمانی
 period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
@@ -81,25 +80,24 @@ if uploaded_files:
         if df is None:
             continue
 
-        name = file.name.split('.')[0]
+        name = getattr(file, 'name', 'Asset').split('.')[0]
 
-        if 'Date' not in df.columns or 'Price' not in df.columns:
-            st.warning(f"فایل {name} باید دارای ستون‌های 'Date' و 'Price' باشد.")
+        if 'date' not in df.columns or 'price' not in df.columns:
+            st.warning(f"فایل {name} باید دارای ستون‌های 'date' و 'price' باشد.")
             continue
 
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df['Price'] = df['Price'].astype(str).str.replace(',', '')
-        df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
-        df = df.dropna(subset=['Date', 'Price'])
-        df = df[['Date', 'Price']].set_index('Date')
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        df['price'] = df['price'].astype(str).str.replace(',', '')
+        df['price'] = pd.to_numeric(df['price'], errors='coerce')
+        df = df.dropna(subset=['date', 'price'])
+        df = df[['date', 'price']].set_index('date')
         df.columns = [name]
 
-        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
+        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')  # یا 'outer' به دلخواه شما
         asset_names.append(name)
 
         # تنظیمات بیمه در سایدبار برای هر دارایی
-        st.sidebar.markdown(f"---
-### ⚙️ تنظیمات بیمه برای دارایی: `{name}`")
+        st.sidebar.markdown(f"---\n### ⚙️ تنظیمات بیمه برای دارایی: `{name}`")
         insured = st.sidebar.checkbox(f"📌 فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
         if insured:
             loss_percent = st.sidebar.number_input(f"📉 درصد ضرر معامله پوت برای {name}", 0.0, 100.0, 30.0, step=0.01, key=f"loss_{name}")
