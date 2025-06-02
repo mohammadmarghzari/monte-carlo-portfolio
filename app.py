@@ -4,13 +4,11 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import yfinance as yf
-
 import io
 
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو، CVaR و Married Put", layout="wide")
 st.title("📊 ابزار تحلیل پرتفو با روش مونت‌کارلو، CVaR و استراتژی Married Put")
 
-# راهنمای یاهو فاینانس (در ابتدای صفحه)
 with st.expander("📘 راهنمای دریافت داده آنلاین از یاهو فاینانس"):
     st.markdown("""
     <div dir="rtl" style="text-align: right; font-size: 15px">
@@ -79,9 +77,16 @@ Date,Price
 """
 st.download_button("دانلود نمونه فایل txt", sample_txt, file_name="sample.txt", mime="text/plain")
 
+def get_unique_name(existing_names, base_name):
+    if base_name not in existing_names:
+        return base_name
+    i = 2
+    while f"{base_name}_{i}" in existing_names:
+        i += 1
+    return f"{base_name}_{i}"
+
 def read_uploaded_file(file):
     try:
-        # خواندن فایل csv یا txt با حذف خطوط توضیحی (شروع با #)
         if file.name.lower().endswith('.csv'):
             df = pd.read_csv(file)
         elif file.name.lower().endswith('.txt'):
@@ -91,7 +96,6 @@ def read_uploaded_file(file):
         else:
             st.error(f"فرمت فایل {file.name} پشتیبانی نمی‌شود.")
             return None
-
         df.columns = df.columns.str.strip().str.lower().str.replace('%', '')
         df.rename(columns={'date': 'Date', 'price': 'Price'}, inplace=True)
         return df
@@ -101,9 +105,9 @@ def read_uploaded_file(file):
 
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV یا TXT)")
 uploaded_files = st.sidebar.file_uploader(
-    "چند فایل CSV یا TXT آپلود کنید (هر دارایی یک فایل)", 
-    type=['csv', 'txt'], 
-    accept_multiple_files=True, 
+    "چند فایل CSV یا TXT آپلود کنید (هر دارایی یک فایل)",
+    type=['csv', 'txt'],
+    accept_multiple_files=True,
     key="uploader"
 )
 
@@ -113,7 +117,6 @@ annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}
 user_risk = st.sidebar.slider("ریسک هدف پرتفو (انحراف معیار سالانه)", 0.01, 1.0, 0.25, 0.01)
 cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
 
-# === فیچر: دانلود داده آنلاین از یاهو فاینانس ===
 with st.sidebar.expander("📥 دانلود داده آنلاین از یاهو فاینانس"):
     st.markdown("""
     <div dir="rtl" style="text-align: right; font-size: 14px">
@@ -156,7 +159,6 @@ if download_btn and tickers_input.strip():
     except Exception as ex:
         st.error(f"خطا در دریافت داده: {ex}")
 
-# نمایش داده‌های دانلودشده (جدول)
 if downloaded_dfs:
     st.markdown('<div dir="rtl" style="text-align: right;"><b>داده‌های دانلودشده از یاهو فاینانس:</b></div>', unsafe_allow_html=True)
     for t, df in downloaded_dfs:
@@ -167,10 +169,12 @@ if uploaded_files or downloaded_dfs:
     prices_df = pd.DataFrame()
     asset_names = []
     insured_assets = {}
+    existing_names = set()
 
-    # ابتدا داده‌های دانلودشده از یاهو
+    # داده‌های دانلودشده از یاهو
     for t, df in downloaded_dfs:
-        name = t
+        name = get_unique_name(existing_names, t)
+        existing_names.add(name)
         if 'Date' not in df.columns or 'Price' not in df.columns:
             st.warning(f"داده آنلاین {name} باید دارای ستون‌های 'Date' و 'Price' باشد.")
             continue
@@ -180,24 +184,23 @@ if uploaded_files or downloaded_dfs:
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
         asset_names.append(name)
 
-    # سپس فایل‌های آپلودی کاربر
+    # فایل‌های آپلودی کاربر
     for file in uploaded_files:
+        base_name = file.name.split('.')[0]
+        name = get_unique_name(existing_names, base_name)
+        existing_names.add(name)
         df = read_uploaded_file(file)
         if df is None:
             continue
-
-        name = file.name.split('.')[0]
         if 'Date' not in df.columns or 'Price' not in df.columns:
             st.warning(f"فایل {name} باید دارای ستون‌های 'Date' و 'Price' باشد.")
             continue
-
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df['Price'] = df['Price'].astype(str).str.replace(',', '')
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
         df = df.dropna(subset=['Date', 'Price'])
         df = df[['Date', 'Price']].set_index('Date')
         df.columns = [name]
-
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
         asset_names.append(name)
 
