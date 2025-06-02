@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
 import plotly.express as px
 import yfinance as yf
 import io
@@ -33,28 +32,18 @@ Date,Price
 st.download_button("دانلود نمونه فایل txt", sample_txt, file_name="sample.txt", mime="text/plain")
 
 def smart_read_file(file):
-    """
-    خواندن و تمیزکاری هوشمند فایل csv/txt (هر جداکننده و هر ساختاری!)
-    فقط ستون تاریخ و قیمت را برمی‌گرداند.
-    """
     try:
         content = file.read()
         try:
             content = content.decode("utf-8")
         except Exception:
             content = content.decode("latin1")
-
-        # تشخیص جداکننده محتمل
         seps = [',',';','|','\t']
         sep_counts = [(s, content.count(s)) for s in seps]
         sep = max(sep_counts, key=lambda x:x[1])[0] if max(sep_counts, key=lambda x:x[1])[1] > 0 else ','
-
-        # فقط خطوط غیرخالی و غیرتوضیحی
         lines = [l.strip() for l in content.splitlines() if l.strip() and not l.strip().startswith('#')]
         if not lines:
             return None
-
-        # جداسازی هدر و داده‌ها
         header = [x.strip().replace('"','').replace("'",'') for x in re.split(sep, lines[0])]
         def find_col(colnames, candidates):
             for c in candidates:
@@ -62,12 +51,10 @@ def smart_read_file(file):
                     if c.lower() in h.lower():
                         return i
             return None
-
         date_idx = find_col(header, ['date', 'تاریخ'])
         price_idx = find_col(header, ['price', 'قیمت'])
         if date_idx is None or price_idx is None:
             return None
-
         data_rows = []
         for row in lines[1:]:
             parts = [x.strip().replace('"','').replace("'",'') for x in re.split(sep, row)]
@@ -81,10 +68,8 @@ def smart_read_file(file):
             except:
                 continue
             data_rows.append([date_val, price_float])
-
         if not data_rows:
             return None
-
         df = pd.DataFrame(data_rows, columns=['Date', 'Price'])
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df.dropna(subset=['Date', 'Price'])
@@ -164,7 +149,6 @@ def get_unique_name(existing_names, base_name):
 if uploaded_files or downloaded_dfs:
     prices_df = pd.DataFrame()
     asset_names = []
-    insured_assets = {}
     existing_names = set()
 
     # داده‌های دانلودشده
@@ -197,24 +181,6 @@ if uploaded_files or downloaded_dfs:
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
         asset_names.append(name)
 
-        st.sidebar.markdown(f"---\n### ⚙️ تنظیمات بیمه برای دارایی: `{name}`")
-        insured = st.sidebar.checkbox(f"📌 فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
-        if insured:
-            loss_percent = st.sidebar.number_input(f"📉 درصد ضرر معامله پوت برای {name}", 0.0, 100.0, 30.0, step=0.01, key=f"loss_{name}")
-            strike = st.sidebar.number_input(f"🎯 قیمت اعمال پوت برای {name}", 0.0, 1e6, 100.0, step=0.01, key=f"strike_{name}")
-            premium = st.sidebar.number_input(f"💰 قیمت قرارداد پوت برای {name}", 0.0, 1e6, 5.0, step=0.01, key=f"premium_{name}")
-            amount = st.sidebar.number_input(f"📦 مقدار قرارداد برای {name}", 0.0, 1e6, 1.0, step=0.01, key=f"amount_{name}")
-            spot_price = st.sidebar.number_input(f"📌 قیمت فعلی دارایی پایه {name}", 0.0, 1e6, 100.0, step=0.01, key=f"spot_{name}")
-            asset_amount = st.sidebar.number_input(f"📦 مقدار دارایی پایه {name}", 0.0, 1e6, 1.0, step=0.01, key=f"base_{name}")
-            insured_assets[name] = {
-                'loss_percent': loss_percent,
-                'strike': strike,
-                'premium': premium,
-                'amount': amount,
-                'spot': spot_price,
-                'base': asset_amount
-            }
-
     if prices_df.empty or prices_df.shape[1] < 2:
         st.error("❌ داده‌ی معتبری برای تحلیل یافت نشد یا حداقل دو دارایی معتبر ندارید.")
         st.stop()
@@ -232,33 +198,94 @@ if uploaded_files or downloaded_dfs:
     cov_matrix = returns.cov() * annual_factor
     std_devs = np.sqrt(np.diag(cov_matrix))
 
-    adjusted_cov = cov_matrix.copy()
-    preference_weights = []
-
-    for i, name in enumerate(asset_names):
-        if name in insured_assets:
-            risk_scale = 1 - insured_assets[name]['loss_percent'] / 100
-            adjusted_cov.iloc[i, :] *= risk_scale
-            adjusted_cov.iloc[:, i] *= risk_scale
-            preference_weights.append(1 / (std_devs[i] * risk_scale**0.7))
-        else:
-            preference_weights.append(1 / std_devs[i])
-    preference_weights = np.array(preference_weights)
-    preference_weights /= np.sum(preference_weights)
-
     # بررسی سلامت کوواریانس
-    if np.any(np.isnan(adjusted_cov)) or np.any(np.isinf(adjusted_cov)):
+    if np.any(np.isnan(cov_matrix)) or np.any(np.isinf(cov_matrix)):
         st.error("ماتریس کوواریانس ناسالم است (شامل NaN یا Inf). داده‌ها را بررسی کنید (مثلاً داده کم یا فایل خراب).")
         st.stop()
-    if not np.allclose(adjusted_cov, adjusted_cov.T):
+    if not np.allclose(cov_matrix, cov_matrix.T):
         st.error("ماتریس کوواریانس متقارن نیست.")
         st.stop()
-    eigvals = np.linalg.eigvals(adjusted_cov)
+    eigvals = np.linalg.eigvals(cov_matrix)
     if np.any(eigvals <= 0):
         st.error("ماتریس کوواریانس مثبت معین نیست یا داده‌ها کافی نیست یا دارایی‌های تکراری دارید.")
         st.stop()
 
-    # ... ادامه کد ابزار مثل نمونه‌های قبلی (شبیه‌سازی مونت‌کارلو و داشبورد)
+    n_portfolios = 8000
+    n_mc = 1000
+    results = np.zeros((5 + len(asset_names), n_portfolios))
+    np.random.seed(42)
+    rf = 0
+
+    downside = returns.copy()
+    downside[downside > 0] = 0
+
+    for i in range(n_portfolios):
+        weights = np.random.random(len(asset_names))
+        weights /= np.sum(weights)
+        port_return = np.dot(weights, mean_returns)
+        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        downside_risk = np.sqrt(np.dot(weights.T, np.dot(downside.cov() * annual_factor, weights)))
+        sharpe_ratio = (port_return - rf) / port_std
+        sortino_ratio = (port_return - rf) / downside_risk if downside_risk > 0 else np.nan
+
+        mc_sims = np.random.multivariate_normal(mean_returns/annual_factor, cov_matrix/annual_factor, n_mc)
+        port_mc_returns = np.dot(mc_sims, weights)
+        VaR = np.percentile(port_mc_returns, (1 - cvar_alpha) * 100)
+        CVaR = port_mc_returns[port_mc_returns <= VaR].mean() if np.any(port_mc_returns <= VaR) else VaR
+
+        results[0, i] = port_return
+        results[1, i] = port_std
+        results[2, i] = sharpe_ratio
+        results[3, i] = sortino_ratio
+        results[4, i] = -CVaR
+        results[5:, i] = weights
+
+    results_df = pd.DataFrame(results.T, columns=['Return', 'Risk', 'Sharpe', 'Sortino', 'CVaR'] + asset_names)
+    max_sharpe = results_df.iloc[results_df['Sharpe'].idxmax()]
+    min_risk = results_df.iloc[results_df['Risk'].idxmin()]
+    min_cvar = results_df.iloc[results_df['CVaR'].idxmin()]
+
+    st.markdown("### ⚡ بهترین پرتفو بر اساس بیشترین شارپ:")
+    st.table(pd.DataFrame({
+        'وزن': max_sharpe[asset_names].round(4),
+        'نام دارایی': asset_names
+    }).set_index('نام دارایی').T)
+    st.info(f"بازده سالانه: {max_sharpe['Return']:.2%}   |   ریسک (انحراف معیار): {max_sharpe['Risk']:.2%}   |   شارپ: {max_sharpe['Sharpe']:.2f}")
+
+    st.markdown("### ⚡ امن‌ترین پرتفو (کمترین ریسک):")
+    st.table(pd.DataFrame({
+        'وزن': min_risk[asset_names].round(4),
+        'نام دارایی': asset_names
+    }).set_index('نام دارایی').T)
+    st.info(f"بازده سالانه: {min_risk['Return']:.2%}   |   ریسک (انحراف معیار): {min_risk['Risk']:.2%}")
+
+    st.markdown("### ⚡ پرتفو با کمترین CVaR:")
+    st.table(pd.DataFrame({
+        'وزن': min_cvar[asset_names].round(4),
+        'نام دارایی': asset_names
+    }).set_index('نام دارایی').T)
+    st.info(f"بازده سالانه: {min_cvar['Return']:.2%}   |   CVaR: {min_cvar['CVaR']:.2%}")
+
+    st.markdown("### 📈 نمودار ریسک/بازده پرتفوها و نقاط بهینه")
+    fig = px.scatter(results_df, x='Risk', y='Return', color='Sharpe', hover_data=asset_names,
+                     title='پرتفوهای شبیه‌سازی‌شده (مونت‌کارلو)')
+    fig.add_scatter(x=[max_sharpe['Risk']], y=[max_sharpe['Return']],
+                    mode='markers', marker=dict(color='red', size=15, symbol='star'),
+                    name="بیشترین شارپ")
+    fig.add_scatter(x=[min_risk['Risk']], y=[min_risk['Return']],
+                    mode='markers', marker=dict(color='blue', size=12, symbol='circle'),
+                    name="کمترین ریسک")
+    fig.add_scatter(x=[min_cvar['Risk']], y=[min_cvar['Return']],
+                    mode='markers', marker=dict(color='orange', size=12, symbol='diamond'),
+                    name="کمترین CVaR")
+    fig.update_layout(xaxis_title='ریسک (انحراف معیار سالانه)', yaxis_title='بازده سالانه')
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("### 🗂 جدول کامل پرتفوهای شبیه‌سازی‌شده")
+    st.dataframe(results_df.round(4))
+
+    st.markdown("### 📊 نمودار وزنی دارایی‌های پرتفو بهینه (شارپ)")
+    st.plotly_chart(px.pie(names=asset_names, values=max_sharpe[asset_names], title="وزن دارایی‌ها در پرتفو با بیشترین شارپ"), use_container_width=True)
 
 else:
     st.warning("⚠️ لطفاً فایل‌های CSV یا TXT معتبر شامل ستون‌های Date و Price را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
