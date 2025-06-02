@@ -4,6 +4,9 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 
+# اضافه‌کردن یاهو فاینانس
+import yfinance as yf
+
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو، CVaR و Married Put", layout="wide")
 st.title("📊 ابزار تحلیل پرتفو با روش مونت‌کارلو، CVaR و استراتژی Married Put")
 
@@ -28,33 +31,68 @@ annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}
 user_risk = st.sidebar.slider("ریسک هدف پرتفو (انحراف معیار سالانه)", 0.01, 1.0, 0.25, 0.01)
 cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
 
-# --- فیچر: آموزش و راهنما ---
-with st.expander("📚 راهنمای استفاده و توضیح فیچرها (برای هر بخش روی عنوان آن کلیک کنید)"):
+# === فیچر: دانلود داده آنلاین از یاهو فاینانس ===
+with st.sidebar.expander("📥 دانلود داده آنلاین از یاهو فاینانس"):
     st.markdown("""
-    <div dir="rtl" style="text-align: right">
-    <b>راهنمای سریع:</b><br>
-    - فایل‌های قیمت هر دارایی را با فرمت CSV و با ستون‌های <b>Date</b> و <b>Price</b> بارگذاری کنید.<br>
-    - بازه زمانی، سطح ریسک و سایر پارامترها را تنظیم کنید.<br>
-    - برای هر دارایی می‌توانید بیمه (Married Put) فعال کنید.<br>
+    <div dir="rtl" style="text-align: right; font-size: 14px">
+    <b>راهنما:</b><br>
+    - نماد هر دارایی را مطابق سایت یاهو فاینانس وارد کنید.<br>
+    - نمادها را با کاما و بدون فاصله وارد کنید.<br>
+    - مثال: <b>BTC-USD,AAPL,GOOGL,ETH-USD</b><br>
+    - برای بیت‌کوین: <b>BTC-USD</b> <br>
+    - برای اپل: <b>AAPL</b> <br>
+    - برای اتریوم: <b>ETH-USD</b> <br>
+    - برای شاخص S&P500: <b>^GSPC</b> <br>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown("""
-    <div dir="rtl" style="text-align: right">
-    <b>توضیح اصطلاحات:</b><br>
-    <b>پرتفو بهینه (مونت‌کارلو):</b> ترکیب بهینه دارایی‌ها بر اساس شبیه‌سازی تصادفی.<br>
-    <b>پرتفو بهینه CVaR:</b> پرتفو با کمترین ریسک شدید.<br>
-    <b>Married Put:</b> استراتژی بیمه پرتفو با اختیار فروش.<br>
-    <b>سناریو و حساسیت:</b> تست تاثیر تغییرات شدید بازار یا پارامترها.<br>
-    <b>تحلیل همبستگی:</b> بررسی تاثیر رفتار مشترک دارایی‌ها.<br>
-    <b>داشبورد خلاصه:</b> مشاهده سریع وضعیت پرتفوی.<br>
-    </div>
-    """, unsafe_allow_html=True)
+    tickers_input = st.text_input("نماد دارایی‌ها (با کاما و بدون فاصله)")
+    start = st.date_input("تاریخ شروع", value=pd.to_datetime("2023-01-01"))
+    end = st.date_input("تاریخ پایان", value=pd.to_datetime("today"))
+    download_btn = st.button("دریافت داده آنلاین")
 
-if uploaded_files:
+downloaded_dfs = []
+if download_btn and tickers_input.strip():
+    tickers = [t.strip() for t in tickers_input.strip().split(",") if t.strip()]
+    try:
+        data = yf.download(tickers, start=start, end=end, progress=False, group_by='ticker', auto_adjust=True)
+        if not data.empty:
+            for t in tickers:
+                if len(tickers) == 1:
+                    # اگر فقط یک دارایی است، ساختار داده فرق دارد
+                    df = data.reset_index()[['Date', 'Close']].rename(columns={'Close': 'Price'})
+                else:
+                    if t in data.columns.levels[0]:
+                        df_t = data[t].reset_index()[['Date', 'Close']].rename(columns={'Close': 'Price'})
+                        df = df_t
+                    else:
+                        st.warning(f"داده‌ای برای نماد {t} دریافت نشد.")
+                        continue
+                df['Date'] = pd.to_datetime(df['Date'])
+                downloaded_dfs.append((t, df))
+                st.success(f"داده {t} با موفقیت دانلود شد.")
+        else:
+            st.error("داده‌ای دریافت نشد!")
+    except Exception as ex:
+        st.error(f"خطا در دریافت داده: {ex}")
+
+if uploaded_files or downloaded_dfs:
     prices_df = pd.DataFrame()
     asset_names = []
     insured_assets = {}
 
+    # ابتدا داده‌های دانلودشده از یاهو
+    for t, df in downloaded_dfs:
+        name = t
+        if 'Date' not in df.columns or 'Price' not in df.columns:
+            st.warning(f"داده آنلاین {name} باید دارای ستون‌های 'Date' و 'Price' باشد.")
+            continue
+        df = df.dropna(subset=['Date', 'Price'])
+        df = df[['Date', 'Price']].set_index('Date')
+        df.columns = [name]
+        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
+        asset_names.append(name)
+
+    # سپس فایل‌های آپلودی کاربر
     for file in uploaded_files:
         df = read_csv_file(file)
         if df is None:
@@ -270,29 +308,6 @@ if uploaded_files:
     </div>
     ''', unsafe_allow_html=True)
 
-    # --- فیچر: تحلیل حساسیت ریسک پرتفو نسبت به پارامترهای کلیدی ---
-    with st.expander("🎚 تحلیل حساسیت (Sensitivity Analysis)"):
-        st.markdown("""
-        <div dir="rtl" style="text-align: right">
-        تاثیر تغییر پارامترهای کلیدی مثل ریسک هدف و سطح اطمینان CVaR روی ترکیب پرتفو را در نمودار زیر مشاهده کنید.
-        </div>
-        """, unsafe_allow_html=True)
-        risk_range = np.linspace(0.05, 0.5, 20)
-        cvar_range = np.linspace(0.8, 0.99, 10)
-        sens_returns = []
-        sens_risks = []
-        sens_cvars = []
-        for r in risk_range:
-            idx = np.argmin(np.abs(results[1] - r))
-            sens_returns.append(results[0, idx])
-            sens_risks.append(results[1, idx])
-            sens_cvars.append(results[4, idx])
-        fig_sens = go.Figure()
-        fig_sens.add_trace(go.Scatter(x=risk_range, y=sens_returns, mode='lines+markers', name='بازده پرتفو'))
-        fig_sens.add_trace(go.Scatter(x=risk_range, y=sens_cvars, mode='lines+markers', name='CVaR پرتفو'))
-        fig_sens.update_layout(title="تاثیر تغییر ریسک هدف بر بازده و CVaR پرتفو", xaxis_title="ریسک هدف", yaxis_title="مقدار")
-        st.plotly_chart(fig_sens, use_container_width=True)
-
     st.subheader("🔵 نمودار بازده- CVaR برای پرتفوها")
     fig_cvar = px.scatter(
         x=results[4], y=results[0],
@@ -309,36 +324,6 @@ if uploaded_files:
     این نمودار رابطه بین بازده و معیار ریسک <b>CVaR</b> را در سبدهای مختلف نمایش می‌دهد. هرچه مقدار CVaR کمتر باشد، پرتفو در سناریوهای بحرانی کمتر آسیب‌پذیر است.
     </div>
     ''', unsafe_allow_html=True)
-
-    # --- فیچر: تحلیل همبستگی ---
-    with st.expander("📊 ماتریس همبستگی دارایی‌ها"):
-        st.markdown("""
-        <div dir="rtl" style="text-align: right">
-        همبستگی بین دارایی‌ها را بررسی کنید تا سبد متنوع‌تر و کم‌ریسک‌تری داشته باشید.
-        </div>
-        """, unsafe_allow_html=True)
-        corr_matrix = returns.corr()
-        fig_corr = px.imshow(corr_matrix, text_auto=True, color_continuous_scale='RdBu', aspect='auto', title="ماتریس همبستگی")
-        st.plotly_chart(fig_corr, use_container_width=True)
-        st.markdown(f"<div dir='rtl' style='text-align:right'> بیشترین همبستگی: <b>{corr_matrix.stack().drop_duplicates().sort_values(ascending=False)[1]}</b> کمترین همبستگی: <b>{corr_matrix.stack().drop_duplicates().sort_values()[0]}</b> </div>", unsafe_allow_html=True)
-
-    # --- فیچر: تحلیل سناریو ---
-    with st.expander("🚨 تحلیل سناریو (Scenario Analysis)"):
-        st.markdown("""
-        <div dir="rtl" style="text-align: right">
-        تاثیر یک سناریوی فرضی بازار بر پرتفو را تست کنید (مثلاً سقوط یا رشد یک دارایی).
-        </div>
-        """, unsafe_allow_html=True)
-        selected_asset = st.selectbox("انتخاب دارایی برای سناریو", asset_names, key="scenario_asset")
-        scenario_percent = st.slider("درصد تغییر قیمت دارایی انتخابی", -70, 70, 0, 1, key="scenario_slider")
-        scenario_returns = returns.copy()
-        if scenario_percent != 0:
-            scenario_returns[selected_asset] += scenario_percent / 100
-        scenario_mean = scenario_returns.mean() * annual_factor
-        scenario_cov = scenario_returns.cov() * annual_factor
-        port_return_scenario = np.dot(best_weights, scenario_mean)
-        port_risk_scenario = np.sqrt(np.dot(best_weights.T, np.dot(scenario_cov, best_weights)))
-        st.markdown(f"<div dir='rtl' style='text-align:right'><b>بازده پرتفو تحت سناریو:</b> {port_return_scenario:.2%} <b>ریسک پرتفو تحت سناریو:</b> {port_risk_scenario:.2%}</div>", unsafe_allow_html=True)
 
     st.subheader("💡 دارایی‌های پیشنهادی بر اساس نسبت بازده به ریسک")
     asset_scores = {}
@@ -436,22 +421,5 @@ if uploaded_files:
     </div>
     ''', unsafe_allow_html=True)
 
-    # --- فیچر: اعمال محدودیت‌های سفارشی روی وزن دارایی‌ها ---
-    with st.expander("⚖️ محدودیت‌های وزن دارایی‌ها (اختیاری)"):
-        st.markdown("""
-        <div dir="rtl" style="text-align: right">
-        برای هر دارایی می‌توانید حداکثر و حداقل وزن در پرتفو تعیین کنید.<br>
-        (این فیچر فقط نمایش است و روی بهینه‌سازی اصلی اثر نمی‌گذارد، اما راهنمایی برای ترکیب منطقی‌تر پرتفو خواهد بود.)
-        </div>
-        """, unsafe_allow_html=True)
-        min_limits = {}
-        max_limits = {}
-        for name in asset_names:
-            min_limits[name] = st.number_input(f"حداقل وزن برای {name} (%)", 0.0, 100.0, 0.0, 1.0, key=f"minl_{name}")
-            max_limits[name] = st.number_input(f"حداکثر وزن برای {name} (%)", 0.0, 100.0, 100.0, 1.0, key=f"maxl_{name}")
-        st.markdown("<div dir='rtl' style='text-align:right'>مقادیر فعلی وزن پرتفو:</div>", unsafe_allow_html=True)
-        for i, name in enumerate(asset_names):
-            st.markdown(f"{name}: {best_weights[i]*100:.2f}% (حداقل: {min_limits[name]}% - حداکثر: {max_limits[name]}%)")
-
 else:
-    st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price را آپلود کنید.")
+    st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
