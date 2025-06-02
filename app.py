@@ -4,11 +4,30 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 
-# اضافه‌کردن یاهو فاینانس
 import yfinance as yf
 
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو، CVaR و Married Put", layout="wide")
 st.title("📊 ابزار تحلیل پرتفو با روش مونت‌کارلو، CVaR و استراتژی Married Put")
+
+# راهنمای یاهو فاینانس (در ابتدای صفحه)
+with st.expander("📘 راهنمای دریافت داده آنلاین از یاهو فاینانس"):
+    st.markdown("""
+    <div dir="rtl" style="text-align: right; font-size: 15px">
+    <b>نحوه دانلود داده:</b><br>
+    - نماد هر دارایی را مطابق سایت Yahoo Finance وارد کنید.<br>
+    - نمادها را با <b>کاما</b> و <b>بدون فاصله</b> وارد کنید.<br>
+    - مثال: <b>BTC-USD,AAPL,ETH-USD</b><br>
+    - برای بیت‌کوین: <b>BTC-USD</b><br>
+    - برای اپل: <b>AAPL</b><br>
+    - برای اتریوم: <b>ETH-USD</b><br>
+    - برای شاخص S&P500: <b>^GSPC</b><br>
+    <br>
+    <b>توضیحات بیشتر:</b><br>
+    - نماد هر دارایی را می‌توانید در سایت <a href="https://finance.yahoo.com" target="_blank">Yahoo Finance</a> جستجو کنید.<br>
+    - اگر چند نماد وارد می‌کنید، فقط با کاما جدا کنید و فاصله نگذارید.<br>
+    - داده‌های دانلودشده دقیقاً مانند فایل CSV در ابزار استفاده می‌شوند.<br>
+    </div>
+    """, unsafe_allow_html=True)
 
 def read_csv_file(file):
     try:
@@ -58,7 +77,6 @@ if download_btn and tickers_input.strip():
         if not data.empty:
             for t in tickers:
                 if len(tickers) == 1:
-                    # اگر فقط یک دارایی است، ساختار داده فرق دارد
                     df = data.reset_index()[['Date', 'Close']].rename(columns={'Close': 'Price'})
                 else:
                     if t in data.columns.levels[0]:
@@ -74,6 +92,13 @@ if download_btn and tickers_input.strip():
             st.error("داده‌ای دریافت نشد!")
     except Exception as ex:
         st.error(f"خطا در دریافت داده: {ex}")
+
+# نمایش داده‌های دانلودشده (جدول)
+if downloaded_dfs:
+    st.markdown('<div dir="rtl" style="text-align: right;"><b>داده‌های دانلودشده از یاهو فاینانس:</b></div>', unsafe_allow_html=True)
+    for t, df in downloaded_dfs:
+        st.markdown(f"<div dir='rtl' style='text-align: right;'><b>{t}</b></div>", unsafe_allow_html=True)
+        st.dataframe(df.head())
 
 if uploaded_files or downloaded_dfs:
     prices_df = pd.DataFrame()
@@ -158,10 +183,9 @@ if uploaded_files or downloaded_dfs:
     preference_weights = np.array(preference_weights)
     preference_weights /= np.sum(preference_weights)
 
-    # شبیه‌سازی مونت‌کارلو با CVaR
     n_portfolios = 10000
     n_mc = 1000
-    results = np.zeros((5 + len(asset_names), n_portfolios)) # [0:ret, 1:std, 2:sharpe, 3:sortino, 4:cvar, ...weights]
+    results = np.zeros((5 + len(asset_names), n_portfolios))
     np.random.seed(42)
     rf = 0
 
@@ -177,7 +201,6 @@ if uploaded_files or downloaded_dfs:
         sharpe_ratio = (port_return - rf) / port_std
         sortino_ratio = (port_return - rf) / downside_risk if downside_risk > 0 else np.nan
 
-        # Monte Carlo simulation for CVaR
         mc_sims = np.random.multivariate_normal(mean_returns/annual_factor, adjusted_cov/annual_factor, n_mc)
         port_mc_returns = np.dot(mc_sims, weights)
         VaR = np.percentile(port_mc_returns, (1 - cvar_alpha) * 100)
@@ -187,10 +210,9 @@ if uploaded_files or downloaded_dfs:
         results[1, i] = port_std
         results[2, i] = sharpe_ratio
         results[3, i] = sortino_ratio
-        results[4, i] = -CVaR  # علامت منفی برای نمایش مقدار مثبت زیان
+        results[4, i] = -CVaR
         results[5:, i] = weights
 
-    # بهترین پرتفو بر اساس ریسک هدف
     best_idx = np.argmin(np.abs(results[1] - user_risk))
     best_return = results[0, best_idx]
     best_risk = results[1, best_idx]
@@ -198,14 +220,12 @@ if uploaded_files or downloaded_dfs:
     best_sortino = results[3, best_idx]
     best_weights = results[5:, best_idx]
 
-    # بهترین پرتفو بر اساس کمترین CVaR
     best_cvar_idx = np.argmin(results[4])
     best_cvar_return = results[0, best_cvar_idx]
     best_cvar_risk = results[1, best_cvar_idx]
     best_cvar_cvar = results[4, best_cvar_idx]
     best_cvar_weights = results[5:, best_cvar_idx]
 
-    # --- فیچر: داشبورد خلاصه و چکیده پرتفو ---
     st.subheader("📊 داشبورد خلاصه پرتفو")
     total_weight = np.sum(best_weights)
     st.markdown(f'''
@@ -217,7 +237,6 @@ if uploaded_files or downloaded_dfs:
     <b>کمترین وزن:</b> {asset_names[np.argmin(best_weights)]} ({np.min(best_weights)*100:.2f}%)<br>
     </div>
     ''', unsafe_allow_html=True)
-    # نمودار دونات توزیع وزن
     fig_pie = go.Figure(data=[go.Pie(labels=asset_names, values=best_weights * 100, hole=.5, textinfo='label+percent')])
     fig_pie.update_layout(title="توزیع وزنی پرتفو بهینه")
     st.plotly_chart(fig_pie, use_container_width=True)
