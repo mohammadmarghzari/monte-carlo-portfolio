@@ -5,3 +5,4 @@ plotly
 scipy
 matplotlib
 kaleido
+yfinance
