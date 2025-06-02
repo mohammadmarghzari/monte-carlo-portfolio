@@ -3,13 +3,10 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-from scipy.stats import norm
-import io
 
-st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو و Married Put", layout="wide")
-st.title("📊 ابزار تحلیل پرتفو با روش مونت‌کارلو و استراتژی Married Put")
+st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو، CVaR و Married Put", layout="wide")
+st.title("📊 ابزار تحلیل پرتفو با روش مونت‌کارلو، CVaR و استراتژی Married Put")
 
-# تابع خواندن فایل CSV
 def read_csv_file(file):
     try:
         df = pd.read_csv(file)
@@ -20,18 +17,16 @@ def read_csv_file(file):
         st.error(f"خطا در خواندن فایل {file.name}: {e}")
         return None
 
-# بارگذاری فایل‌ها
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV آپلود کنید (هر دارایی یک فایل)", type=['csv'], accept_multiple_files=True, key="uploader"
 )
 
-# تنظیمات بازه زمانی
 period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
 resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'شش‌ماهه': '2Q'}[period]
 annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}[period]
-
 user_risk = st.sidebar.slider("ریسک هدف پرتفو (انحراف معیار سالانه)", 0.01, 1.0, 0.25, 0.01)
+cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
 
 if uploaded_files:
     prices_df = pd.DataFrame()
@@ -92,7 +87,6 @@ if uploaded_files:
     adjusted_cov = cov_matrix.copy()
     preference_weights = []
 
-    # بیمه، ریسک، وزن‌دهی
     for i, name in enumerate(asset_names):
         if name in insured_assets:
             risk_scale = 1 - insured_assets[name]['loss_percent'] / 100
@@ -104,11 +98,12 @@ if uploaded_files:
     preference_weights = np.array(preference_weights)
     preference_weights /= np.sum(preference_weights)
 
-    # شبیه‌سازی مونت‌کارلو
+    # شبیه‌سازی مونت‌کارلو با CVaR
     n_portfolios = 10000
-    results = np.zeros((4 + len(asset_names), n_portfolios)) # 0: return, 1: std, 2: sharpe, 3: sortino, 4...: weights
+    n_mc = 1000
+    results = np.zeros((5 + len(asset_names), n_portfolios)) # [0:ret, 1:std, 2:sharpe, 3:sortino, 4:cvar, ...weights]
     np.random.seed(42)
-    rf = 0 # نرخ بدون ریسک
+    rf = 0
 
     downside = returns.copy()
     downside[downside > 0] = 0
@@ -122,11 +117,18 @@ if uploaded_files:
         sharpe_ratio = (port_return - rf) / port_std
         sortino_ratio = (port_return - rf) / downside_risk if downside_risk > 0 else np.nan
 
+        # Monte Carlo simulation for CVaR
+        mc_sims = np.random.multivariate_normal(mean_returns/annual_factor, adjusted_cov/annual_factor, n_mc)
+        port_mc_returns = np.dot(mc_sims, weights)
+        VaR = np.percentile(port_mc_returns, (1 - cvar_alpha) * 100)
+        CVaR = port_mc_returns[port_mc_returns <= VaR].mean() if np.any(port_mc_returns <= VaR) else VaR
+
         results[0, i] = port_return
         results[1, i] = port_std
         results[2, i] = sharpe_ratio
         results[3, i] = sortino_ratio
-        results[4:, i] = weights
+        results[4, i] = -CVaR  # علامت منفی برای نمایش مقدار مثبت زیان
+        results[5:, i] = weights
 
     # بهترین پرتفو بر اساس ریسک هدف
     best_idx = np.argmin(np.abs(results[1] - user_risk))
@@ -134,30 +136,93 @@ if uploaded_files:
     best_risk = results[1, best_idx]
     best_sharpe = results[2, best_idx]
     best_sortino = results[3, best_idx]
-    best_weights = results[4:, best_idx]
+    best_weights = results[5:, best_idx]
 
-    st.subheader("📈 پورتفو بهینه")
+    # بهترین پرتفو بر اساس کمترین CVaR
+    best_cvar_idx = np.argmin(results[4])
+    best_cvar_return = results[0, best_cvar_idx]
+    best_cvar_risk = results[1, best_cvar_idx]
+    best_cvar_cvar = results[4, best_cvar_idx]
+    best_cvar_weights = results[5:, best_cvar_idx]
+
+    st.subheader("📈 پرتفو بهینه (مونت‌کارلو)")
     st.markdown(f"""
     - ✅ بازده سالانه: **{best_return:.2%}**
     - ⚠️ ریسک سالانه (انحراف معیار): **{best_risk:.2%}**
     - 🧠 نسبت شارپ: **{best_sharpe:.2f}**
     - 📉 نسبت سورتینو: **{best_sortino:.2f}**
     """)
-
     for i, name in enumerate(asset_names):
         st.markdown(f"🔹 وزن {name}: {best_weights[i]*100:.2f}%")
 
-    # نمودار مرز کارا و نمایش ریسک و بازده
-    fig = px.scatter(x=results[1]*100, y=results[0]*100, color=results[2],
-                     labels={'x': 'ریسک (%)', 'y': 'بازده (%)'},
-                     title='پرتفوهای شبیه‌سازی‌شده', color_continuous_scale='Viridis')
+    st.subheader(f"🟢 پرتفو بهینه بر اساس CVaR ({int(cvar_alpha*100)}%)")
+    st.markdown(f"""
+    - ✅ بازده سالانه: **{best_cvar_return:.2%}**
+    - ⚠️ ریسک سالانه (انحراف معیار): **{best_cvar_risk:.2%}**
+    - 🟠 CVaR ({int(cvar_alpha*100)}%): **{best_cvar_cvar:.2%}**
+    """)
+    for i, name in enumerate(asset_names):
+        st.markdown(f"🔸 وزن {name}: {best_cvar_weights[i]*100:.2f}%")
+
+    # جدول مقایسه وزن‌ها
+    st.subheader("📋 جدول مقایسه وزن دارایی‌ها (مونت‌کارلو و CVaR)")
+    compare_df = pd.DataFrame({
+        'دارایی': asset_names,
+        'وزن مونت‌کارلو (%)': best_weights * 100,
+        f'وزن CVaR ({int(cvar_alpha*100)}%) (%)': best_cvar_weights * 100
+    })
+    compare_df['اختلاف وزن (%)'] = compare_df[f'وزن CVaR ({int(cvar_alpha*100)}%) (%)'] - compare_df['وزن مونت‌کارلو (%)']
+    st.dataframe(compare_df.set_index('دارایی'), use_container_width=True, height=300)
+
+    # نمودار میله‌ای مقایسه وزن‌ها
+    fig_w = go.Figure()
+    fig_w.add_trace(go.Bar(x=asset_names, y=best_weights*100, name='مونت‌کارلو'))
+    fig_w.add_trace(go.Bar(x=asset_names, y=best_cvar_weights*100, name=f'CVaR {int(cvar_alpha*100)}%'))
+    fig_w.update_layout(barmode='group', title="مقایسه وزن دارایی‌ها در دو سبک")
+    st.plotly_chart(fig_w, use_container_width=True)
+
+    # نمودار مرز کارای بازده-ریسک و بازده-CVaR
+    st.subheader("🌈 نمودار مرز کارا")
+    fig = px.scatter(
+        x=results[1]*100,
+        y=results[0]*100,
+        color=results[2],
+        labels={'x': 'ریسک (%)', 'y': 'بازده (%)'},
+        title='پرتفوهای شبیه‌سازی‌شده (مونت‌کارلو) و مرز CVaR',
+        color_continuous_scale='Viridis'
+    )
     fig.add_trace(go.Scatter(x=[best_risk*100], y=[best_return*100],
                              mode='markers', marker=dict(size=12, color='red', symbol='star'),
-                             name='پرتفوی بهینه'))
+                             name='پرتفوی بهینه مونت‌کارلو'))
+    fig.add_trace(go.Scatter(x=[best_cvar_risk*100], y=[best_cvar_return*100],
+                             mode='markers', marker=dict(size=12, color='orange', symbol='star'),
+                             name='پرتفوی بهینه CVaR'))
+    cvar_sorted_idx = np.argsort(results[4])
+    fig.add_trace(go.Scatter(
+        x=results[1, cvar_sorted_idx]*100,
+        y=results[0, cvar_sorted_idx]*100,
+        mode='lines',
+        line=dict(color='orange', dash='dot'),
+        name='مرز کارا (CVaR)'
+    ))
     st.plotly_chart(fig, use_container_width=True)
 
+    # نمودار Scatter بازده-CVaR
+    st.subheader("🔵 نمودار بازده- CVaR برای پرتفوها")
+    fig_cvar = px.scatter(
+        x=results[4], y=results[0],
+        labels={'x': f'CVaR ({int(cvar_alpha*100)}%)', 'y': 'بازده'},
+        title='پرتفوها بر اساس بازده و CVaR',
+        color=results[1], color_continuous_scale='Blues'
+    )
+    fig_cvar.add_trace(go.Scatter(x=[best_cvar_cvar], y=[best_cvar_return],
+                                  mode='markers', marker=dict(size=12, color='red', symbol='star'),
+                                  name='پرتفوی بهینه CVaR'))
+    st.plotly_chart(fig_cvar, use_container_width=True)
+
+    # بقیه بخش‌های Married Put و پیش‌بینی قیمت آینده مثل گذشته:
     # پیشنهاد دارایی‌ها با کمترین ریسک و بیشترین بازده (با بیمه)
-    st.subheader("💡 دارایی‌های پیشنهادی:")
+    st.subheader("💡 دارایی‌های پیشنهادی بر اساس نسبت بازده به ریسک")
     asset_scores = {}
     for i, name in enumerate(asset_names):
         insured_factor = 1 - insured_assets.get(name, {}).get('loss_percent', 0)/100 if name in insured_assets else 1
@@ -170,7 +235,7 @@ if uploaded_files:
         insured_str = " (بیمه شده)" if name in insured_assets else ""
         st.markdown(f"🔸 **{name}{insured_str}** | نسبت بازده به ریسک: {score:.2f}")
 
-    # نمودار سود و زیان Married Put برای هر دارایی
+    # Married Put charts
     for name, info in insured_assets.items():
         st.subheader(f"📉 نمودار سود و زیان استراتژی Married Put - {name}")
         x = np.linspace(info['spot'] * 0.5, info['spot'] * 1.5, 200)
@@ -179,7 +244,6 @@ if uploaded_files:
         total_pnl = asset_pnl + put_pnl
 
         fig2 = go.Figure()
-        # بخش سود (سبز) و زیان (قرمز)
         fig2.add_trace(go.Scatter(
             x=x[total_pnl>=0], y=total_pnl[total_pnl>=0], mode='lines', name='سود', line=dict(color='green', width=3)
         ))
@@ -192,13 +256,11 @@ if uploaded_files:
         fig2.add_trace(go.Scatter(
             x=x, y=put_pnl, mode='lines', name='پوت', line=dict(dash='dot', color='blue')
         ))
-        # نقطه سر به سری
         zero_crossings = np.where(np.diff(np.sign(total_pnl)))[0]
         if len(zero_crossings):
             breakeven_x = x[zero_crossings[0]]
             fig2.add_trace(go.Scatter(x=[breakeven_x], y=[0], mode='markers+text', marker=dict(color='orange', size=10),
                                       text=["سر به سر"], textposition="bottom center", name='سر به سر'))
-        # درصد سود
         max_pnl = np.max(total_pnl)
         max_x = x[np.argmax(total_pnl)]
         fig2.add_trace(go.Scatter(x=[max_x], y=[max_pnl], mode='markers+text', marker=dict(color='green', size=10),
@@ -207,7 +269,6 @@ if uploaded_files:
         fig2.update_layout(title='نمودار سود و زیان', xaxis_title='قیمت دارایی در سررسید', yaxis_title='سود/زیان')
         st.plotly_chart(fig2, use_container_width=True)
 
-        # ذخیره به تصویر
         if st.button(f"📷 ذخیره نمودار Married Put برای {name}"):
             try:
                 img_bytes = fig2.to_image(format="png")
@@ -215,7 +276,7 @@ if uploaded_files:
             except Exception as e:
                 st.error(f"❌ خطا در ذخیره تصویر: {e}")
 
-    # نمودار پیش‌بینی قیمت آتی و بازده برای هر دارایی
+    # پیش‌بینی قیمت آتی و بازده برای هر دارایی
     st.subheader("🔮 پیش‌بینی قیمت و بازده آتی هر دارایی")
     future_months = 6 if period == 'شش‌ماهه' else (3 if period == 'سه‌ماهه' else 1)
     for i, name in enumerate(asset_names):
