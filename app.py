@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 import yfinance as yf
 import io
-import re
 
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو، CVaR و Married Put", layout="wide")
 st.title("📊 ابزار تحلیل پرتفو با روش مونت‌کارلو، CVaR و استراتژی Married Put")
@@ -32,63 +31,64 @@ Date,Price
 """
 st.download_button("دانلود نمونه فایل txt", sample_txt, file_name="sample.txt", mime="text/plain")
 
-def clean_date(val):
-    """تاریخ را به فرمت YYYY-MM-DD تبدیل می‌کند (در حد امکان)"""
-    try:
-        return pd.to_datetime(val, dayfirst=False, errors='coerce').strftime('%Y-%m-%d')
-    except Exception:
-        return val
-
-def clean_price(val):
-    """قیمت را به float تمیز تبدیل می‌کند"""
-    if pd.isnull(val):
-        return np.nan
-    s = str(val)
-    s = re.sub(r'["\',]', '', s)
-    s = re.sub(r'[^\d\.\-]', '', s)
-    try:
-        return float(s)
-    except Exception:
-        return np.nan
-
 def read_uploaded_file(file):
     try:
-        # خواندن فایل به صورت خام (csv یا txt)
         content = file.read()
         try:
-            # ابتدا بررسی کنیم فایل utf-8 است
             content = content.decode("utf-8")
         except Exception:
-            # اگر نبود، با encoding دیگر (مثلاً latin1) بخوانیم
             content = content.decode("latin1")
-        # حذف خطوط توضیحی
-        lines = [l for l in content.splitlines() if l.strip() and not l.strip().startswith('#')]
-        # تبدیل لیست به متن دوباره
-        data_str = '\n'.join(lines)
-        # تشخیص جداکننده: اگر ; بیشتر از , است، جداکننده را ; قرار بده
-        delimiter = ',' if data_str.count(',') >= data_str.count(';') else ';'
-        # خواندن دیتا
-        df = pd.read_csv(io.StringIO(data_str), delimiter=delimiter)
-        # تمیز کردن نام ستون‌ها (حذف کوتیشن و فاصله)
-        df.columns = [c.strip().replace('"', '').replace("'", "").lower() for c in df.columns]
-        # سعی کن ستون‌های مناسب پیدا کنی
-        # پیدا کردن ستون تاریخ
-        date_cols = [c for c in df.columns if 'date' in c]
-        price_cols = [c for c in df.columns if 'price' in c]
-        if not date_cols or not price_cols:
-            st.error("فایل باید شامل ستون‌های Date و Price باشد (حتی اگر اسمشون مثلاً 'Close Price' باشه).")
+        lines = []
+        for l in content.splitlines():
+            l = l.strip()
+            if not l or l.startswith('#'):
+                continue
+            # فقط خطوط با حداقل 2 مقدار (جداشده با کاما یا سمی‌کالن)
+            if ',' in l:
+                parts = [x.strip().replace('"','').replace("'",'') for x in l.split(',')]
+            elif ';' in l:
+                parts = [x.strip().replace('"','').replace("'",'') for x in l.split(';')]
+            else:
+                continue
+            if len(parts) < 2:
+                continue
+            lines.append(parts)
+        # تعیین هدر
+        if not lines:
+            st.error("هیچ خط داده معتبری پیدا نشد.")
             return None
-        # انتخاب اولین ستون تاریخ و قیمت
-        date_col = date_cols[0]
-        price_col = price_cols[0]
-        df = df[[date_col, price_col]]
-        df.columns = ['Date', 'Price']
-        # تمیز کردن تاریخ و قیمت
-        df['Date'] = df['Date'].map(clean_date)
-        df['Price'] = df['Price'].map(clean_price)
-        # حذف سطرهایی که Price یا Date ندارند
+        header = [c.lower() for c in lines[0]]
+        # پیدا کردن ایندکس date و price
+        date_idx = next((i for i, c in enumerate(header) if 'date' in c), None)
+        price_idx = next((i for i, c in enumerate(header) if 'price' in c), None)
+        if date_idx is None or price_idx is None:
+            st.error("ستون‌های Date و Price باید در فایل وجود داشته باشند.")
+            return None
+        # ساخت دیتافریم فقط با این دو ستون
+        data_rows = []
+        for row in lines[1:]:
+            if len(row) <= max(date_idx, price_idx):
+                continue
+            date_val = row[date_idx]
+            price_val = row[price_idx]
+            # تمیزسازی price
+            price_val = price_val.replace(',','').replace(' ','')
+            try:
+                price_float = float(price_val)
+            except Exception:
+                try:
+                    # اگر قیمت اعشاری با کاما بود (مثلاً 12,87)
+                    price_float = float(price_val.replace(',', '.'))
+                except Exception:
+                    continue
+            data_rows.append([date_val, price_float])
+        if not data_rows:
+            st.error("هیچ ردیف داده معتبری پیدا نشد (بررسی کنید Price عددی باشد).")
+            return None
+        df = pd.DataFrame(data_rows, columns=['Date', 'Price'])
+        # تبدیل تاریخ به datetime
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df.dropna(subset=['Date', 'Price'])
-        # مرتب‌سازی بر اساس تاریخ
         df = df.sort_values('Date')
         return df
     except Exception as e:
@@ -223,7 +223,6 @@ if uploaded_files or downloaded_dfs:
 
     st.subheader("🧪 پیش‌نمایش داده‌ها")
     st.dataframe(prices_df.tail())
-    # حذف دارایی‌هایی که داده معتبر ندارند یا تکراری‌اند
     prices_df = prices_df.dropna(axis=1, how='any')
     if prices_df.shape[1] < 2:
         st.error("حداقل دو دارایی معتبر نیاز است (هر دارایی ستون جدا).")
@@ -291,7 +290,7 @@ if uploaded_files or downloaded_dfs:
         results[4, i] = -CVaR
         results[5:, i] = weights
 
-    # ... ادامه کد ابزار مثل قبل است (داشبورد و نمودارها)
-    # اگر لازم است بگو تا ادامه را هم اینجا بنویسم.
+    # بقیه کد ابزار (نمایش داشبورد و نمودارها) مثل قبل
+
 else:
     st.warning("⚠️ لطفاً فایل‌های CSV یا TXT معتبر شامل ستون‌های Date و Price را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
