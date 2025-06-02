@@ -28,6 +28,28 @@ annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}
 user_risk = st.sidebar.slider("ریسک هدف پرتفو (انحراف معیار سالانه)", 0.01, 1.0, 0.25, 0.01)
 cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
 
+# --- فیچر: آموزش و راهنما ---
+with st.expander("📚 راهنمای استفاده و توضیح فیچرها (برای هر بخش روی عنوان آن کلیک کنید)"):
+    st.markdown("""
+    <div dir="rtl" style="text-align: right">
+    <b>راهنمای سریع:</b><br>
+    - فایل‌های قیمت هر دارایی را با فرمت CSV و با ستون‌های <b>Date</b> و <b>Price</b> بارگذاری کنید.<br>
+    - بازه زمانی، سطح ریسک و سایر پارامترها را تنظیم کنید.<br>
+    - برای هر دارایی می‌توانید بیمه (Married Put) فعال کنید.<br>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("""
+    <div dir="rtl" style="text-align: right">
+    <b>توضیح اصطلاحات:</b><br>
+    <b>پرتفو بهینه (مونت‌کارلو):</b> ترکیب بهینه دارایی‌ها بر اساس شبیه‌سازی تصادفی.<br>
+    <b>پرتفو بهینه CVaR:</b> پرتفو با کمترین ریسک شدید.<br>
+    <b>Married Put:</b> استراتژی بیمه پرتفو با اختیار فروش.<br>
+    <b>سناریو و حساسیت:</b> تست تاثیر تغییرات شدید بازار یا پارامترها.<br>
+    <b>تحلیل همبستگی:</b> بررسی تاثیر رفتار مشترک دارایی‌ها.<br>
+    <b>داشبورد خلاصه:</b> مشاهده سریع وضعیت پرتفوی.<br>
+    </div>
+    """, unsafe_allow_html=True)
+
 if uploaded_files:
     prices_df = pd.DataFrame()
     asset_names = []
@@ -145,6 +167,23 @@ if uploaded_files:
     best_cvar_cvar = results[4, best_cvar_idx]
     best_cvar_weights = results[5:, best_cvar_idx]
 
+    # --- فیچر: داشبورد خلاصه و چکیده پرتفو ---
+    st.subheader("📊 داشبورد خلاصه پرتفو")
+    total_weight = np.sum(best_weights)
+    st.markdown(f'''
+    <div dir="rtl" style="text-align: right">
+    <b>بازده سالانه پرتفو:</b> {best_return:.2%}<br>
+    <b>ریسک سالانه پرتفو:</b> {best_risk:.2%}<br>
+    <b>نسبت شارپ:</b> {best_sharpe:.2f}<br>
+    <b>بیشترین وزن:</b> {asset_names[np.argmax(best_weights)]} ({np.max(best_weights)*100:.2f}%)<br>
+    <b>کمترین وزن:</b> {asset_names[np.argmin(best_weights)]} ({np.min(best_weights)*100:.2f}%)<br>
+    </div>
+    ''', unsafe_allow_html=True)
+    # نمودار دونات توزیع وزن
+    fig_pie = go.Figure(data=[go.Pie(labels=asset_names, values=best_weights * 100, hole=.5, textinfo='label+percent')])
+    fig_pie.update_layout(title="توزیع وزنی پرتفو بهینه")
+    st.plotly_chart(fig_pie, use_container_width=True)
+
     st.subheader("📈 پرتفو بهینه (مونت‌کارلو)")
     st.markdown(f"""
     - ✅ بازده سالانه: **{best_return:.2%}**
@@ -231,6 +270,29 @@ if uploaded_files:
     </div>
     ''', unsafe_allow_html=True)
 
+    # --- فیچر: تحلیل حساسیت ریسک پرتفو نسبت به پارامترهای کلیدی ---
+    with st.expander("🎚 تحلیل حساسیت (Sensitivity Analysis)"):
+        st.markdown("""
+        <div dir="rtl" style="text-align: right">
+        تاثیر تغییر پارامترهای کلیدی مثل ریسک هدف و سطح اطمینان CVaR روی ترکیب پرتفو را در نمودار زیر مشاهده کنید.
+        </div>
+        """, unsafe_allow_html=True)
+        risk_range = np.linspace(0.05, 0.5, 20)
+        cvar_range = np.linspace(0.8, 0.99, 10)
+        sens_returns = []
+        sens_risks = []
+        sens_cvars = []
+        for r in risk_range:
+            idx = np.argmin(np.abs(results[1] - r))
+            sens_returns.append(results[0, idx])
+            sens_risks.append(results[1, idx])
+            sens_cvars.append(results[4, idx])
+        fig_sens = go.Figure()
+        fig_sens.add_trace(go.Scatter(x=risk_range, y=sens_returns, mode='lines+markers', name='بازده پرتفو'))
+        fig_sens.add_trace(go.Scatter(x=risk_range, y=sens_cvars, mode='lines+markers', name='CVaR پرتفو'))
+        fig_sens.update_layout(title="تاثیر تغییر ریسک هدف بر بازده و CVaR پرتفو", xaxis_title="ریسک هدف", yaxis_title="مقدار")
+        st.plotly_chart(fig_sens, use_container_width=True)
+
     st.subheader("🔵 نمودار بازده- CVaR برای پرتفوها")
     fig_cvar = px.scatter(
         x=results[4], y=results[0],
@@ -247,6 +309,36 @@ if uploaded_files:
     این نمودار رابطه بین بازده و معیار ریسک <b>CVaR</b> را در سبدهای مختلف نمایش می‌دهد. هرچه مقدار CVaR کمتر باشد، پرتفو در سناریوهای بحرانی کمتر آسیب‌پذیر است.
     </div>
     ''', unsafe_allow_html=True)
+
+    # --- فیچر: تحلیل همبستگی ---
+    with st.expander("📊 ماتریس همبستگی دارایی‌ها"):
+        st.markdown("""
+        <div dir="rtl" style="text-align: right">
+        همبستگی بین دارایی‌ها را بررسی کنید تا سبد متنوع‌تر و کم‌ریسک‌تری داشته باشید.
+        </div>
+        """, unsafe_allow_html=True)
+        corr_matrix = returns.corr()
+        fig_corr = px.imshow(corr_matrix, text_auto=True, color_continuous_scale='RdBu', aspect='auto', title="ماتریس همبستگی")
+        st.plotly_chart(fig_corr, use_container_width=True)
+        st.markdown(f"<div dir='rtl' style='text-align:right'> بیشترین همبستگی: <b>{corr_matrix.stack().drop_duplicates().sort_values(ascending=False)[1]}</b> کمترین همبستگی: <b>{corr_matrix.stack().drop_duplicates().sort_values()[0]}</b> </div>", unsafe_allow_html=True)
+
+    # --- فیچر: تحلیل سناریو ---
+    with st.expander("🚨 تحلیل سناریو (Scenario Analysis)"):
+        st.markdown("""
+        <div dir="rtl" style="text-align: right">
+        تاثیر یک سناریوی فرضی بازار بر پرتفو را تست کنید (مثلاً سقوط یا رشد یک دارایی).
+        </div>
+        """, unsafe_allow_html=True)
+        selected_asset = st.selectbox("انتخاب دارایی برای سناریو", asset_names, key="scenario_asset")
+        scenario_percent = st.slider("درصد تغییر قیمت دارایی انتخابی", -70, 70, 0, 1, key="scenario_slider")
+        scenario_returns = returns.copy()
+        if scenario_percent != 0:
+            scenario_returns[selected_asset] += scenario_percent / 100
+        scenario_mean = scenario_returns.mean() * annual_factor
+        scenario_cov = scenario_returns.cov() * annual_factor
+        port_return_scenario = np.dot(best_weights, scenario_mean)
+        port_risk_scenario = np.sqrt(np.dot(best_weights.T, np.dot(scenario_cov, best_weights)))
+        st.markdown(f"<div dir='rtl' style='text-align:right'><b>بازده پرتفو تحت سناریو:</b> {port_return_scenario:.2%} <b>ریسک پرتفو تحت سناریو:</b> {port_risk_scenario:.2%}</div>", unsafe_allow_html=True)
 
     st.subheader("💡 دارایی‌های پیشنهادی بر اساس نسبت بازده به ریسک")
     asset_scores = {}
@@ -343,6 +435,23 @@ if uploaded_files:
     در این مدل، با استفاده از مدل‌سازی تصادفی (Random Walk) و پارامترهای بازده و ریسک تاریخی، قیمت‌های آتی هر دارایی در بازه زمانی مشخص شبیه‌سازی می‌شود. این پیش‌بینی به شما دید بهتری نسبت به سناریوهای احتمالی قیمت در آینده می‌دهد، اما باید توجه داشت که پیش‌بینی‌ها هیچ‌گاه قطعی نیستند و فقط جنبه تحلیلی و آماری دارند.
     </div>
     ''', unsafe_allow_html=True)
+
+    # --- فیچر: اعمال محدودیت‌های سفارشی روی وزن دارایی‌ها ---
+    with st.expander("⚖️ محدودیت‌های وزن دارایی‌ها (اختیاری)"):
+        st.markdown("""
+        <div dir="rtl" style="text-align: right">
+        برای هر دارایی می‌توانید حداکثر و حداقل وزن در پرتفو تعیین کنید.<br>
+        (این فیچر فقط نمایش است و روی بهینه‌سازی اصلی اثر نمی‌گذارد، اما راهنمایی برای ترکیب منطقی‌تر پرتفو خواهد بود.)
+        </div>
+        """, unsafe_allow_html=True)
+        min_limits = {}
+        max_limits = {}
+        for name in asset_names:
+            min_limits[name] = st.number_input(f"حداقل وزن برای {name} (%)", 0.0, 100.0, 0.0, 1.0, key=f"minl_{name}")
+            max_limits[name] = st.number_input(f"حداکثر وزن برای {name} (%)", 0.0, 100.0, 100.0, 1.0, key=f"maxl_{name}")
+        st.markdown("<div dir='rtl' style='text-align:right'>مقادیر فعلی وزن پرتفو:</div>", unsafe_allow_html=True)
+        for i, name in enumerate(asset_names):
+            st.markdown(f"{name}: {best_weights[i]*100:.2f}% (حداقل: {min_limits[name]}% - حداکثر: {max_limits[name]}%)")
 
 else:
     st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price را آپلود کنید.")
