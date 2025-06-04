@@ -2,47 +2,84 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import yfinance as yf
+import re
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from io import BytesIO
-
-# مدل‌های ML پیشرفته
 from lightgbm import LGBMRegressor
 from xgboost import XGBRegressor
 
-st.set_page_config(page_title="تحلیل پرتفو با مدل‌های پیشرفته", layout="wide")
-st.title("📊 ابزار تحلیل پرتفو: مونت‌کارلو، CVaR، Married Put و مدل‌های پیشرفته")
+st.set_page_config(page_title="تحلیل پرتفو (بارگذاری چند فایل داده)", layout="wide")
+st.title("📊 ابزار تحلیل پرتفو (بارگذاری چند فایل داده تاریخی)")
 
-# --- راهنمای استفاده ---
-with st.expander("📘 راهنمای دریافت داده آنلاین از یاهو فاینانس"):
+with st.expander("📘 راهنمای بارگذاری داده"):
     st.markdown("""
-    - نماد سهام را به فرمت یاهو فاینانس وارد کنید (مثال: AAPL برای اپل، MSFT برای مایکروسافت).
-    - برای بورس تهران نماد را به صورت `نماد.IR` وارد کنید (مثال: فولاد.IR).
-    - وزن پرتفو باید بین ۰ و ۱ باشد و مجموع آن‌ها ۱ شود.
-    - تعداد شبیه‌سازی و بازه زمانی را بر اساس نیاز تنظیم کنید.
+    - می‌توانید چندین فایل داده (CSV یا TXT) برای نمادهای مختلف بارگذاری کنید.
+    - هر فایل باید شامل تاریخ و قیمت دارایی باشد (ستون‌هایی مثل date, price, close, adj close و ...).
+    - ابزار به طور خودکار نام ستون‌ها را تمیز و داده‌های ناقص را حذف می‌کند و همه داده‌ها را در یک جدول ترکیب می‌کند.
+    - نام هر نماد از نام فایل گرفته می‌شود (مثلاً AAPL.csv).
     """)
 
-with st.expander("📗 راهنمای مدل‌های تحلیل پرتفو"):
-    st.markdown("""
-    **مدل‌های قابل انتخاب:**
-    - **مونت‌کارلو:** شبیه‌سازی مسیرهای تصادفی برای پیش‌بینی ارزش آینده پرتفو.
-    - **CVaR/VaR:** محاسبه ریسک پرتفو بر اساس زیان‌های محتمل در سطوح اطمینان مختلف.
-    - **Married Put:** پوشش ریسک با خرید اختیار فروش برای پرتفو.
-    - **Black-Litterman:** ترکیب دیدگاه شخصی با مدل مارکویتز برای تخمین بازده بهینه پرتفو.
-    - **Risk Parity:** تخصیص سرمایه بر اساس سهم مساوی هر دارایی در ریسک کل پرتفو.
-    - **یادگیری ماشین (Random Forest):** پیش‌بینی بازده پرتفو با الگوریتم جنگل تصادفی.
-    - **یادگیری ماشین (LightGBM):** پیش‌بینی بازده پرتفو با مدل سریع و دقیق LightGBM.
-    - **یادگیری ماشین (XGBoost):** پیش‌بینی بازده پرتفو با مدل قدرتمند XGBoost.
-    - **تحلیل سناریو/استرس تست:** بررسی واکنش پرتفو به شوک‌های بازار و سناریوهای بحرانی.
-    """)
+uploaded_files = st.file_uploader("فایل‌های داده پرتفو را بارگذاری کنید (CSV یا TXT)", type=["csv", "txt"], accept_multiple_files=True)
+if not uploaded_files:
+    st.warning("لطفاً حداقل یک فایل داده بارگذاری کنید.")
+    st.stop()
 
-# --- ورودی کاربر برای نمادها و وزن‌ها ---
+def clean_columns(columns):
+    return [re.sub(r'[^a-zA-Z0-9]', '', str(col)).lower() for col in columns]
+
+def auto_detect_price_column(cols):
+    price_keywords = ['price', 'close', 'adjclose', 'adj_close', 'last']
+    for col in cols:
+        for key in price_keywords:
+            if key in col:
+                return col
+    return None
+
+all_data = []
+
+for file in uploaded_files:
+    # خواندن فایل
+    try:
+        df = pd.read_csv(file)
+    except:
+        df = pd.read_csv(file, delimiter="\t")
+    df.columns = clean_columns(df.columns)
+    df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
+    # پیدا کردن ستون تاریخ و قیمت
+    date_col = None
+    for col in df.columns:
+        if 'date' in col or 'data' in col or 'time' in col:
+            date_col = col
+            break
+    price_col = auto_detect_price_column(df.columns)
+    if date_col is None or price_col is None:
+        st.error(f"ستون تاریخ یا قیمت در فایل {file.name} پیدا نشد.")
+        st.stop()
+    df = df[[date_col, price_col]].dropna()
+    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+    df = df.dropna(subset=[date_col])
+    df = df.sort_values(by=date_col).reset_index(drop=True)
+    # نام نماد را از نام فایل استخراج کن
+    symbol = file.name.split('.')[0]
+    df = df.rename(columns={price_col: symbol, date_col: 'date'})
+    all_data.append(df.set_index('date'))
+
+# ادغام همه داده‌ها بر اساس تاریخ
+final_df = pd.concat(all_data, axis=1)
+final_df = final_df.dropna(how='all')  # حذف ردیف‌هایی که همه ستون‌ها خالی‌اند
+final_df = final_df.sort_index()
+
+st.subheader("داده‌های ترکیب‌شده و تمیزشده:")
+st.dataframe(final_df)
+
+tickers = list(final_df.columns)
 st.sidebar.header("تنظیمات پرتفو")
-tickers = st.sidebar.text_area("نمادها (با ویرگول جدا کنید)", value="AAPL,MSFT,GOOGL")
-weights_input = st.sidebar.text_area("وزن پرتفو (با ویرگول جدا کنید، مجموع=1)", value="0.4,0.3,0.3")
+weights_input = st.sidebar.text_area(
+    "وزن پرتفو (با ویرگول جدا کنید، مجموع=1)",
+    value=",".join([str(round(1/len(tickers), 2))]*len(tickers))
+)
 try:
-    tickers = [t.strip() for t in tickers.split(",") if t.strip()]
     weights = [float(w.strip()) for w in weights_input.split(",") if w.strip()]
     assert len(tickers) == len(weights), "تعداد نمادها و وزن‌ها برابر نیست."
     assert np.isclose(sum(weights), 1.0), "مجموع وزن‌ها باید ۱ باشد."
@@ -50,15 +87,12 @@ except Exception as e:
     st.error(f"خطا در ورودی: {e}")
     st.stop()
 
-start_date = st.sidebar.date_input("تاریخ شروع", pd.to_datetime("2020-01-01"))
-end_date = st.sidebar.date_input("تاریخ پایان", pd.to_datetime("today"))
 n_sim = st.sidebar.number_input("تعداد شبیه‌سازی مونت‌کارلو", 100, 5000, 1000)
 n_days = st.sidebar.number_input("تعداد روزهای پیش‌بینی", 30, 365, 180)
 confidence_level = st.sidebar.slider("سطح اطمینان VaR/CVaR", 90, 99, 95)
 initial_investment = st.sidebar.number_input("سرمایه اولیه (دلار)", 1000, 1000000, 10000)
 put_strike_pct = st.sidebar.slider("درصد قیمت اعمال اختیار فروش (Married Put)", 70, 100, 90)
 
-# --- انتخاب مدل ---
 model_options = [
     "مونت‌کارلو",
     "CVaR/VaR",
@@ -72,48 +106,17 @@ model_options = [
 ]
 selected_models = st.sidebar.multiselect("مدل‌های مورد استفاده", model_options, default=model_options[:3])
 
-# --- دریافت داده‌ها (تابع ایمن و حرفه‌ای) ---
-@st.cache_data
-def get_data(tickers, start, end):
-    data = yf.download(tickers, start=start, end=end)
-    if data.empty:
-        return pd.DataFrame()
-    # اگر فقط یک نماد باشد، ستون‌ها تک‌سطحی‌اند
-    if isinstance(data.columns, pd.MultiIndex):
-        if 'Adj Close' in data.columns.get_level_values(0):
-            data = data['Adj Close']
-        else:
-            raise KeyError("ستون 'Adj Close' در داده‌های دریافتی وجود ندارد.")
-    else:
-        if 'Adj Close' in data.columns:
-            data = data['Adj Close'].to_frame()
-        elif 'Close' in data.columns:
-            data = data['Close'].to_frame()
-        else:
-            raise KeyError("ستون 'Adj Close' یا 'Close' در داده‌های دریافتی وجود ندارد.")
-    return data.dropna()
-
-data = get_data(tickers, start_date, end_date)
-if data.empty:
-    st.error("داده‌ای برای نمادها یا بازه زمانی انتخاب‌شده یافت نشد. لطفاً نمادها و تاریخ را بررسی کنید.")
-    st.stop()
-
-st.subheader("داده‌های تاریخی پرتفو")
-st.dataframe(data.tail())
-
-# --- محاسبه بازده و کوواریانس ---
-returns = data.pct_change().dropna()
+returns = final_df.pct_change().dropna()
 mean_returns = returns.mean()
 cov_matrix = returns.cov()
 
-# --- نمایش نمودار قیمت ---
 st.subheader("نمودار قیمت دارایی‌ها")
 fig = go.Figure()
-for t in data.columns:
-    fig.add_trace(go.Scatter(x=data.index, y=data[t], name=t))
+for t in final_df.columns:
+    fig.add_trace(go.Scatter(x=final_df.index, y=final_df[t], name=t))
 st.plotly_chart(fig, use_container_width=True)
 
-# --- مدل مونت‌کارلو ---
+# مونت‌کارلو
 if "مونت‌کارلو" in selected_models:
     def monte_carlo_simulation(mean_returns, cov_matrix, weights, n_sim, n_days, initial_investment):
         sim_results = np.zeros((n_sim, n_days))
@@ -133,7 +136,6 @@ if "مونت‌کارلو" in selected_models:
     fig2.update_layout(title="پرتفو شبیه‌سازی شده", xaxis_title="روز", yaxis_title="ارزش پرتفو")
     st.plotly_chart(fig2, use_container_width=True)
 
-# --- مدل VaR و CVaR ---
 if "CVaR/VaR" in selected_models and "مونت‌کارلو" in selected_models:
     def calculate_var_cvar(sim_results, confidence_level):
         final_values = sim_results[:, -1]
@@ -145,7 +147,6 @@ if "CVaR/VaR" in selected_models and "مونت‌کارلو" in selected_models:
     st.markdown(f"**Value at Risk (VaR) در سطح {confidence_level}%:** {var:,.0f} دلار")
     st.markdown(f"**Conditional Value at Risk (CVaR):** {cvar:,.0f} دلار")
 
-# --- مدل Married Put ---
 if "Married Put" in selected_models and "مونت‌کارلو" in selected_models:
     st.subheader("مقایسه پرتفو با استراتژی Married Put")
     put_strike = (put_strike_pct / 100) * initial_investment
@@ -157,12 +158,11 @@ if "Married Put" in selected_models and "مونت‌کارلو" in selected_mode
     st.plotly_chart(fig3, use_container_width=True)
     st.markdown(f"**حداقل ارزش پرتفو با Married Put:** {put_strike:,.0f} دلار")
 
-# --- مدل Black-Litterman ---
 if "Black-Litterman" in selected_models:
     st.subheader("مدل Black-Litterman")
     pi = mean_returns
     tau = 0.05
-    P = np.eye(len(data.columns))
+    P = np.eye(len(final_df.columns))
     Q = mean_returns.values.reshape(-1, 1)
     omega = np.diag(np.diag(tau * cov_matrix.values))
     inv = np.linalg.inv(tau * cov_matrix.values)
@@ -170,21 +170,19 @@ if "Black-Litterman" in selected_models:
     bl_mean = middle @ (inv @ pi.values.reshape(-1, 1) + P.T @ np.linalg.inv(omega) @ Q)
     bl_weights = bl_mean / np.sum(bl_mean)
     bl_weights = bl_weights.flatten()
-    bl_weights_df = pd.DataFrame({"نماد": data.columns, "وزن بهینه": bl_weights})
+    bl_weights_df = pd.DataFrame({"نماد": final_df.columns, "وزن بهینه": bl_weights})
     st.write("وزن‌های بهینه پرتفو بر اساس مدل Black-Litterman:")
     st.dataframe(bl_weights_df)
 
-# --- مدل Risk Parity ---
 if "Risk Parity" in selected_models:
     st.subheader("مدل Risk Parity")
     asset_vols = returns.std()
     inv_vols = 1 / asset_vols
     risk_parity_weights = inv_vols / inv_vols.sum()
-    rp_weights_df = pd.DataFrame({"نماد": data.columns, "وزن بهینه": risk_parity_weights})
+    rp_weights_df = pd.DataFrame({"نماد": final_df.columns, "وزن بهینه": risk_parity_weights})
     st.write("وزن‌های بهینه پرتفو بر اساس مدل Risk Parity:")
     st.dataframe(rp_weights_df)
 
-# --- مدل یادگیری ماشین (Random Forest) ---
 def ml_feature_engineering(returns):
     features = returns.shift(1).dropna()
     target = returns.mean(axis=1).shift(-1).dropna()
@@ -202,7 +200,6 @@ if "یادگیری ماشین (Random Forest)" in selected_models:
     pred_df = pd.DataFrame({"بازده واقعی": y_test, "پیش‌بینی مدل": y_pred}, index=y_test.index)
     st.line_chart(pred_df)
 
-# --- مدل یادگیری ماشین (LightGBM) ---
 if "یادگیری ماشین (LightGBM)" in selected_models:
     st.subheader("پیش‌بینی بازده پرتفو با LightGBM")
     features, target = ml_feature_engineering(returns)
@@ -214,7 +211,6 @@ if "یادگیری ماشین (LightGBM)" in selected_models:
     pred_df = pd.DataFrame({"بازده واقعی": y_test, "پیش‌بینی مدل": y_pred}, index=y_test.index)
     st.line_chart(pred_df)
 
-# --- مدل یادگیری ماشین (XGBoost) ---
 if "یادگیری ماشین (XGBoost)" in selected_models:
     st.subheader("پیش‌بینی بازده پرتفو با XGBoost")
     features, target = ml_feature_engineering(returns)
@@ -226,7 +222,6 @@ if "یادگیری ماشین (XGBoost)" in selected_models:
     pred_df = pd.DataFrame({"بازده واقعی": y_test, "پیش‌بینی مدل": y_pred}, index=y_test.index)
     st.line_chart(pred_df)
 
-# --- تحلیل سناریو و استرس تست ---
 if "تحلیل سناریو/استرس تست" in selected_models:
     st.subheader("تحلیل سناریو و استرس تست پرتفو")
     st.markdown("""
@@ -242,7 +237,6 @@ if "تحلیل سناریو/استرس تست" in selected_models:
     fig4.update_layout(title="استرس تست پرتفو", yaxis_title="بازده تجمعی")
     st.plotly_chart(fig4, use_container_width=True)
 
-# --- دانلود نتایج مونت‌کارلو ---
 if "مونت‌کارلو" in selected_models:
     def to_excel(df):
         output = BytesIO()
