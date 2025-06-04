@@ -72,15 +72,32 @@ model_options = [
 ]
 selected_models = st.sidebar.multiselect("مدل‌های مورد استفاده", model_options, default=model_options[:3])
 
-# --- دریافت داده‌ها ---
+# --- دریافت داده‌ها (تابع ایمن و حرفه‌ای) ---
 @st.cache_data
 def get_data(tickers, start, end):
-    data = yf.download(tickers, start=start, end=end)["Adj Close"]
-    if isinstance(data, pd.Series):
-        data = data.to_frame()
+    data = yf.download(tickers, start=start, end=end)
+    if data.empty:
+        return pd.DataFrame()
+    # اگر فقط یک نماد باشد، ستون‌ها تک‌سطحی‌اند
+    if isinstance(data.columns, pd.MultiIndex):
+        if 'Adj Close' in data.columns.get_level_values(0):
+            data = data['Adj Close']
+        else:
+            raise KeyError("ستون 'Adj Close' در داده‌های دریافتی وجود ندارد.")
+    else:
+        if 'Adj Close' in data.columns:
+            data = data['Adj Close'].to_frame()
+        elif 'Close' in data.columns:
+            data = data['Close'].to_frame()
+        else:
+            raise KeyError("ستون 'Adj Close' یا 'Close' در داده‌های دریافتی وجود ندارد.")
     return data.dropna()
 
 data = get_data(tickers, start_date, end_date)
+if data.empty:
+    st.error("داده‌ای برای نمادها یا بازه زمانی انتخاب‌شده یافت نشد. لطفاً نمادها و تاریخ را بررسی کنید.")
+    st.stop()
+
 st.subheader("داده‌های تاریخی پرتفو")
 st.dataframe(data.tail())
 
@@ -92,7 +109,7 @@ cov_matrix = returns.cov()
 # --- نمایش نمودار قیمت ---
 st.subheader("نمودار قیمت دارایی‌ها")
 fig = go.Figure()
-for t in tickers:
+for t in data.columns:
     fig.add_trace(go.Scatter(x=data.index, y=data[t], name=t))
 st.plotly_chart(fig, use_container_width=True)
 
@@ -145,7 +162,7 @@ if "Black-Litterman" in selected_models:
     st.subheader("مدل Black-Litterman")
     pi = mean_returns
     tau = 0.05
-    P = np.eye(len(tickers))
+    P = np.eye(len(data.columns))
     Q = mean_returns.values.reshape(-1, 1)
     omega = np.diag(np.diag(tau * cov_matrix.values))
     inv = np.linalg.inv(tau * cov_matrix.values)
@@ -153,7 +170,7 @@ if "Black-Litterman" in selected_models:
     bl_mean = middle @ (inv @ pi.values.reshape(-1, 1) + P.T @ np.linalg.inv(omega) @ Q)
     bl_weights = bl_mean / np.sum(bl_mean)
     bl_weights = bl_weights.flatten()
-    bl_weights_df = pd.DataFrame({"نماد": tickers, "وزن بهینه": bl_weights})
+    bl_weights_df = pd.DataFrame({"نماد": data.columns, "وزن بهینه": bl_weights})
     st.write("وزن‌های بهینه پرتفو بر اساس مدل Black-Litterman:")
     st.dataframe(bl_weights_df)
 
@@ -163,7 +180,7 @@ if "Risk Parity" in selected_models:
     asset_vols = returns.std()
     inv_vols = 1 / asset_vols
     risk_parity_weights = inv_vols / inv_vols.sum()
-    rp_weights_df = pd.DataFrame({"نماد": tickers, "وزن بهینه": risk_parity_weights})
+    rp_weights_df = pd.DataFrame({"نماد": data.columns, "وزن بهینه": risk_parity_weights})
     st.write("وزن‌های بهینه پرتفو بر اساس مدل Risk Parity:")
     st.dataframe(rp_weights_df)
 
