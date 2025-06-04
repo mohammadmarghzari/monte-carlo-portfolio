@@ -6,3 +6,8 @@ scipy
 matplotlib
 kaleido
 yfinance
+scikit-learn
+xlsxwriter
+openpyxl
+lightgbm
+xgboost
