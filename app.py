@@ -13,27 +13,7 @@ from sklearn.linear_model import LinearRegression
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو، CVaR، مدل‌های کلاسیک و یادگیری ماشین", layout="wide")
 st.title("📊 ابزار تحلیل پرتفو با روش مونت‌کارلو، CVaR، مدل‌های کلاسیک و یادگیری ماشین")
 
-# ===== راهنمای یاهو فاینانس =====
-with st.expander("📘 راهنمای دریافت داده آنلاین از یاهو فاینانس"):
-    st.markdown("""
-    <div dir="rtl" style="text-align: right; font-size: 15px">
-    <b>نحوه دانلود داده:</b><br>
-    - نماد هر دارایی را مطابق سایت Yahoo Finance وارد کنید.<br>
-    - نمادها را با <b>کاما</b> و <b>بدون فاصله</b> وارد کنید.<br>
-    - مثال: <b>BTC-USD,AAPL,ETH-USD</b><br>
-    - برای بیت‌کوین: <b>BTC-USD</b><br>
-    - برای اپل: <b>AAPL</b><br>
-    - برای اتریوم: <b>ETH-USD</b><br>
-    - برای شاخص S&P500: <b>^GSPC</b><br>
-    <br>
-    <b>توضیحات بیشتر:</b><br>
-    - نماد هر دارایی را می‌توانید در سایت <a href="https://finance.yahoo.com" target="_blank">Yahoo Finance</a> جستجو کنید.<br>
-    - اگر چند نماد وارد می‌کنید، فقط با کاما جدا کنید و فاصله نگذارید.<br>
-    - داده‌های دانلودشده دقیقاً مانند فایل CSV در ابزار استفاده می‌شوند.<br>
-    </div>
-    """, unsafe_allow_html=True)
-
-# =============== تابع خواندن مقاوم فایل ===============
+# تابع خواندن فایل مقاوم با تشخیص جداکننده هوشمند (حتی تب)
 def smart_read_file(file):
     try:
         content = file.read()
@@ -41,11 +21,18 @@ def smart_read_file(file):
             content = content.decode("utf-8")
         except Exception:
             content = content.decode("latin1")
-        seps = [',',';','|','\t']
-        sep_counts = [(s, content.count(s)) for s in seps]
-        sep = max(sep_counts, key=lambda x:x[1])[0] if max(sep_counts, key=lambda x:x[1])[1] > 0 else ','
+        sample = "\n".join(content.splitlines()[:3])
+        if "\t" in sample:
+            sep = "\t"
+        elif ";" in sample:
+            sep = ";"
+        elif "," in sample:
+            sep = ","
+        elif "|" in sample:
+            sep = "|"
+        else:
+            sep = ","  # پیش‌فرض
         df = pd.read_csv(io.StringIO(content), sep=sep)
-        # پیدا کردن ستون تاریخ و قیمت (فارسی یا انگلیسی)
         col_date = [col for col in df.columns if 'date' in col.lower() or 'تاریخ' in col.lower()]
         col_price = [col for col in df.columns if 'price' in col.lower() or 'قیمت' in col.lower()]
         if not col_date or not col_price:
@@ -53,14 +40,13 @@ def smart_read_file(file):
             return None
         df = df[[col_date[0], col_price[0]]].copy()
         df.columns = ['Date', 'Price']
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        # پاکسازی قیمت: حذف فاصله، ویرگول فارسی و انگلیسی و نقطه یا هر کاراکتر غیرعددی (به جز نقطه و -)
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce', dayfirst=False)
         df['Price'] = (
             df['Price'].astype(str)
-              .str.replace('٬', '', regex=False)  # ویرگول فارسی
-              .str.replace(',', '', regex=False)  # ویرگول انگلیسی
+              .str.replace('٬', '', regex=False)
+              .str.replace(',', '', regex=False)
               .str.replace(' ', '', regex=False)
-              .str.replace(r'[^\d\.\-]', '', regex=True)  # فقط اعداد و نقطه و -
+              .str.replace(r'[^\d\.\-]', '', regex=True)
         )
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
         df = df.dropna(subset=['Date', 'Price'])
@@ -72,7 +58,6 @@ def smart_read_file(file):
         st.error(f"خطا در خواندن فایل: {e}")
         return None
 
-# =============== مدل‌های کلاسیک و رگرسیونی ===============
 def get_gmv_weights(cov_matrix):
     n = cov_matrix.shape[0]
     args = (cov_matrix,)
@@ -102,8 +87,8 @@ def regression_forecast(prices, periods_ahead=1):
     pred = model.predict([[len(prices) + periods_ahead - 1]])
     return float(pred)
 
-# =============== سایدبار ===============
-st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV یا TXT)")
+# سایدبار
+st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV/TXT - جداکننده هوشمند)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV یا TXT آپلود کنید (هر دارایی یک فایل)", type=['csv', 'txt'], accept_multiple_files=True, key="uploader"
 )
@@ -118,13 +103,8 @@ with st.sidebar.expander("📥 دانلود داده آنلاین از یاهو 
     st.markdown("""
     <div dir="rtl" style="text-align: right; font-size: 14px">
     <b>راهنما:</b><br>
-    - نماد هر دارایی را مطابق سایت یاهو فاینانس وارد کنید.<br>
     - نمادها را با کاما و بدون فاصله وارد کنید.<br>
-    - مثال: <b>BTC-USD,AAPL,GOOGL,ETH-USD</b><br>
-    - برای بیت‌کوین: <b>BTC-USD</b> <br>
-    - برای اپل: <b>AAPL</b> <br>
-    - برای اتریوم: <b>ETH-USD</b> <br>
-    - برای شاخص S&P500: <b>^GSPC</b> <br>
+    - مثال: <b>BTC-USD,AAPL,ETH-USD</b>
     </div>
     """, unsafe_allow_html=True)
     tickers_input = st.text_input("نماد دارایی‌ها (با کاما و بدون فاصله)")
@@ -191,24 +171,6 @@ if uploaded_files or downloaded_dfs:
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
         asset_names.append(name)
 
-        st.sidebar.markdown(f"---\n### ⚙️ تنظیمات بیمه برای دارایی: `{name}`")
-        insured = st.sidebar.checkbox(f"📌 فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
-        if insured:
-            loss_percent = st.sidebar.number_input(f"📉 درصد ضرر معامله پوت برای {name}", 0.0, 100.0, 30.0, step=0.01, key=f"loss_{name}")
-            strike = st.sidebar.number_input(f"🎯 قیمت اعمال پوت برای {name}", 0.0, 1e6, 100.0, step=0.01, key=f"strike_{name}")
-            premium = st.sidebar.number_input(f"💰 قیمت قرارداد پوت برای {name}", 0.0, 1e6, 5.0, step=0.01, key=f"premium_{name}")
-            amount = st.sidebar.number_input(f"📦 مقدار قرارداد برای {name}", 0.0, 1e6, 1.0, step=0.01, key=f"amount_{name}")
-            spot_price = st.sidebar.number_input(f"📌 قیمت فعلی دارایی پایه {name}", 0.0, 1e6, 100.0, step=0.01, key=f"spot_{name}")
-            asset_amount = st.sidebar.number_input(f"📦 مقدار دارایی پایه {name}", 0.0, 1e6, 1.0, step=0.01, key=f"base_{name}")
-            insured_assets[name] = {
-                'loss_percent': loss_percent,
-                'strike': strike,
-                'premium': premium,
-                'amount': amount,
-                'spot': spot_price,
-                'base': asset_amount
-            }
-
     if prices_df.empty:
         st.error("❌ داده‌ی معتبری برای تحلیل یافت نشد.")
         st.stop()
@@ -222,29 +184,15 @@ if uploaded_files or downloaded_dfs:
     cov_matrix = returns.cov() * annual_factor
     std_devs = np.sqrt(np.diag(cov_matrix))
 
-    # ============ مدل‌های کلاسیک و ML/R ==================
     with st.expander("🤖 مدل‌های کلاسیک و یادگیری ماشین (GMV, Sharpe, رگرسیون)"):
-        st.markdown("""
-        <div dir="rtl" style="text-align: right">
-        در این بخش، سه روش استاندارد و هوشمند برای بهینه‌سازی پرتفو و پیش‌بینی آینده دارایی‌ها ارائه شده است:
-        <ol>
-          <li><b>حداقل واریانس جهانی (GMV):</b> کم‌ریسک‌ترین پرتفو ممکن بدون توجه به بازده.</li>
-          <li><b>ماکزیمم نرخ شارپ (Maximum Sharpe Ratio):</b> پیدا کردن پرتفو با بهترین نسبت بازده به ریسک.</li>
-          <li><b>پیش‌بینی رگرسیونی قیمت دارایی‌ها (یادگیری ماشین):</b> استفاده از رگرسیون خطی برای پیش‌بینی قیمت آینده هر دارایی.</li>
-        </ol>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # ====== محاسبه و نمایش GMV ======
         gmv_weights = get_gmv_weights(cov_matrix)
         gmv_ret = np.dot(gmv_weights, mean_returns)
         gmv_risk = np.sqrt(np.dot(gmv_weights.T, np.dot(cov_matrix, gmv_weights)))
-        st.markdown("#### 📘 حداقل واریانس جهانی (Global Minimum Variance)")
+        st.markdown("#### 📘 حداقل واریانس جهانی (GMV)")
         st.markdown(f'''
         <div dir="rtl" style="text-align: right">
-        این مدل کم‌ریسک‌ترین ترکیب پرتفو را صرف‌نظر از بازده انتخاب می‌کند.<br>
-        <b>بازده سالانه پرتفو:</b> {gmv_ret:.2%}<br>
-        <b>ریسک سالانه پرتفو:</b> {gmv_risk:.2%}<br>
+        بازده سالانه: {gmv_ret:.2%} <br>
+        ریسک سالانه: {gmv_risk:.2%} <br>
         {'<br>'.join([f"🔹 <b>{asset_names[i]}</b>: {w*100:.2f}%" for i, w in enumerate(gmv_weights)])}
         </div>
         ''', unsafe_allow_html=True)
@@ -252,7 +200,6 @@ if uploaded_files or downloaded_dfs:
         fig_gmv.update_layout(title="ترکیب وزنی پرتفو GMV")
         st.plotly_chart(fig_gmv, use_container_width=True)
 
-        # ====== محاسبه و نمایش Max Sharpe ======
         ms_weights = get_max_sharpe_weights(mean_returns, cov_matrix)
         ms_ret = np.dot(ms_weights, mean_returns)
         ms_risk = np.sqrt(np.dot(ms_weights.T, np.dot(cov_matrix, ms_weights)))
@@ -260,10 +207,9 @@ if uploaded_files or downloaded_dfs:
         st.markdown("#### 📙 پرتفو با بالاترین نرخ شارپ (Maximum Sharpe Ratio)")
         st.markdown(f'''
         <div dir="rtl" style="text-align: right">
-        این مدل پرتفو با بهترین نسبت بازده به ریسک را می‌سازد.<br>
-        <b>بازده سالانه پرتفو:</b> {ms_ret:.2%}<br>
-        <b>ریسک سالانه پرتفو:</b> {ms_risk:.2%}<br>
-        <b>نسبت شارپ:</b> {ms_sharpe:.2f}<br>
+        بازده سالانه: {ms_ret:.2%} <br>
+        ریسک سالانه: {ms_risk:.2%} <br>
+        نسبت شارپ: {ms_sharpe:.2f} <br>
         {'<br>'.join([f"🔸 <b>{asset_names[i]}</b>: {w*100:.2f}%" for i, w in enumerate(ms_weights)])}
         </div>
         ''', unsafe_allow_html=True)
@@ -271,7 +217,6 @@ if uploaded_files or downloaded_dfs:
         fig_ms.update_layout(title="ترکیب وزنی پرتفو Sharpe")
         st.plotly_chart(fig_ms, use_container_width=True)
 
-        # ====== پیش‌بینی رگرسیونی ======
         st.markdown("#### 📗 پیش‌بینی قیمت آینده با رگرسیون (یادگیری ماشین)")
         reg_rows = []
         for name in asset_names:
@@ -281,20 +226,11 @@ if uploaded_files or downloaded_dfs:
             reg_rows.append({
                 "دارایی": name,
                 "قیمت فعلی": last_price.iloc[-1],
-                "پیش‌بینی رگرسیونی ماه بعد": reg_pred,
+                "پیش‌بینی ماه بعد": reg_pred,
                 "تغییر پیش‌بینی": delta
             })
         reg_df = pd.DataFrame(reg_rows)
         st.dataframe(reg_df.set_index("دارایی"), use_container_width=True)
-        st.markdown("""
-        <div dir="rtl" style="text-align: right">
-        این جدول با رگرسیون خطی (مدل ML ساده)، قیمت احتمالی هر دارایی در ماه آینده را تخمین می‌زند.<br>
-        توجه: این مدل فقط روند خطی را می‌سنجد و ممکن است برای بازارهای پرتلاطم مناسب نباشد.
-        </div>
-        """, unsafe_allow_html=True)
-
-    # ========== ادامه ابزار (مونت‌کارلو، CVaR، Married Put، پیش‌بینی تصادفی و ...) ==========
-    # ... (همان کد کامل قبلی، مطابق نسخه‌های قبلی این چت) ...
 
 else:
-    st.warning("⚠️ لطفاً فایل‌های CSV یا TXT شامل ستون‌های Date و Price را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
+    st.warning("⚠️ لطفاً فایل‌های CSV یا TXT با ستون‌های Date و Price (یا تاریخ و قیمت) آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
