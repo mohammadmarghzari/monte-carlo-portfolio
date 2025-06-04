@@ -14,10 +14,10 @@ st.title("📊 ابزار تحلیل پرتفو (بارگذاری چند فای�
 
 with st.expander("📘 راهنمای بارگذاری داده"):
     st.markdown("""
-    - می‌توانید چندین فایل داده (CSV یا TXT) برای نمادهای مختلف بارگذاری کنید.
-    - هر فایل باید شامل تاریخ و قیمت دارایی باشد (ستون‌هایی مثل date, price, close, adj close و ...).
-    - ابزار به طور خودکار نام ستون‌ها را تمیز و داده‌های ناقص را حذف می‌کند و همه داده‌ها را در یک جدول ترکیب می‌کند.
-    - نام هر نماد از نام فایل گرفته می‌شود (مثلاً AAPL.csv).
+    - چندین فایل داده (CSV یا TXT) برای نمادهای مختلف بارگذاری کنید.
+    - هر فایل باید شامل ستون تاریخ (Date) و قیمت (Price) باشد.
+    - قیمت‌ها می‌توانند شامل کاما باشند (مثلاً 2,163.08). ابزار به طور خودکار آن را عددی می‌کند.
+    - نام هر نماد از نام فایل گرفته می‌شود (مثلاً ETH_USD).
     """)
 
 uploaded_files = st.file_uploader("فایل‌های داده پرتفو را بارگذاری کنید (CSV یا TXT)", type=["csv", "txt"], accept_multiple_files=True)
@@ -25,50 +25,48 @@ if not uploaded_files:
     st.warning("لطفاً حداقل یک فایل داده بارگذاری کنید.")
     st.stop()
 
-def clean_columns(columns):
-    return [re.sub(r'[^a-zA-Z0-9]', '', str(col)).lower() for col in columns]
-
-def auto_detect_price_column(cols):
-    price_keywords = ['price', 'close', 'adjclose', 'adj_close', 'last']
-    for col in cols:
-        for key in price_keywords:
-            if key in col:
-                return col
-    return None
-
 all_data = []
 
 for file in uploaded_files:
-    # خواندن فایل
     try:
         df = pd.read_csv(file)
     except:
         df = pd.read_csv(file, delimiter="\t")
-    df.columns = clean_columns(df.columns)
-    df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
+    # تمیز کردن نام ستون‌ها
+    df.columns = [col.strip().lower() for col in df.columns]
     # پیدا کردن ستون تاریخ و قیمت
     date_col = None
+    price_col = None
     for col in df.columns:
         if 'date' in col or 'data' in col or 'time' in col:
             date_col = col
-            break
-    price_col = auto_detect_price_column(df.columns)
+        if 'price' == col or 'close' in col:
+            price_col = col
     if date_col is None or price_col is None:
         st.error(f"ستون تاریخ یا قیمت در فایل {file.name} پیدا نشد.")
         st.stop()
+    # فقط ستون‌های مورد نیاز
     df = df[[date_col, price_col]].dropna()
-    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-    df = df.dropna(subset=[date_col])
+    # تبدیل قیمت به عدد
+    df[price_col] = df[price_col].astype(str).str.replace(',', '').astype(float)
+    # تبدیل تاریخ به datetime
+    df[date_col] = pd.to_datetime(df[date_col], errors='coerce', infer_datetime_format=True)
+    df = df.dropna(subset=[date_col, price_col])
     df = df.sort_values(by=date_col).reset_index(drop=True)
-    # نام نماد را از نام فایل استخراج کن
     symbol = file.name.split('.')[0]
     df = df.rename(columns={price_col: symbol, date_col: 'date'})
     all_data.append(df.set_index('date'))
 
 # ادغام همه داده‌ها بر اساس تاریخ
 final_df = pd.concat(all_data, axis=1)
-final_df = final_df.dropna(how='all')  # حذف ردیف‌هایی که همه ستون‌ها خالی‌اند
+final_df = final_df.dropna(how='all')
 final_df = final_df.sort_index()
+
+# فقط ستون‌های عددی را نگه دار
+final_df = final_df.select_dtypes(include=[np.number])
+if final_df.shape[1] == 0:
+    st.error("هیچ ستون عددی معتبری در داده‌های شما پیدا نشد. لطفاً فایل‌ها را بررسی کنید.")
+    st.stop()
 
 st.subheader("داده‌های ترکیب‌شده و تمیزشده:")
 st.dataframe(final_df)
