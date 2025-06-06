@@ -35,11 +35,36 @@ if uploaded_files:
         insure = st.sidebar.checkbox(f"فعالسازی بیمه برای {asset_name}", key=f"insure_{asset_name}")
         if insure:
             strat_type = st.sidebar.selectbox(f"نوع بیمه {asset_name}", ["مرید پوت (Protective Put)", "پریوت پوت (Perpetual Put)"], key=f"stype_{asset_name}")
-            entry_price = st.sidebar.number_input(f"قیمت خرید دارایی پایه ({asset_name})", min_value=0.00001, max_value=100.0, value=1.0, step=0.01, key=f"entry_{asset_name}")
-            strike = st.sidebar.number_input(f"قیمت اعمال (استرایک) ({asset_name})", min_value=0.00001, max_value=100.0, value=0.95, step=0.01, key=f"strike_{asset_name}")
-            premium = st.sidebar.number_input(f"پریمیوم (حق بیمه) ({asset_name})", min_value=0.00001, max_value=100.0, value=0.01, step=0.01, key=f"premium_{asset_name}")
-            pos_size = st.sidebar.number_input(f"مقدار دارایی پایه ({asset_name})", min_value=0.00001, max_value=100.0, value=1.0, step=0.01, key=f"possize_{asset_name}")
-            opt_size = st.sidebar.number_input(f"مقدار قرارداد آپشن ({asset_name})", min_value=0.00001, max_value=100.0, value=1.0, step=0.01, key=f"optsize_{asset_name}")
+            entry_price = st.sidebar.number_input(
+                f"قیمت خرید دارایی پایه ({asset_name})",
+                min_value=0.00001, max_value=100.0,
+                value=1.0, step=0.00001, format="%.5f",
+                key=f"entry_{asset_name}"
+            )
+            strike = st.sidebar.number_input(
+                f"قیمت اعمال (استرایک) ({asset_name})",
+                min_value=0.00001, max_value=100.0,
+                value=0.95, step=0.00001, format="%.5f",
+                key=f"strike_{asset_name}"
+            )
+            premium = st.sidebar.number_input(
+                f"پریمیوم (حق بیمه) ({asset_name})",
+                min_value=0.00001, max_value=100.0,
+                value=0.01, step=0.00001, format="%.5f",
+                key=f"premium_{asset_name}"
+            )
+            pos_size = st.sidebar.number_input(
+                f"مقدار دارایی پایه ({asset_name})",
+                min_value=0.00001, max_value=100.0,
+                value=1.0, step=0.00001, format="%.5f",
+                key=f"possize_{asset_name}"
+            )
+            opt_size = st.sidebar.number_input(
+                f"مقدار قرارداد آپشن ({asset_name})",
+                min_value=0.00001, max_value=100.0,
+                value=1.0, step=0.00001, format="%.5f",
+                key=f"optsize_{asset_name}"
+            )
             insurance_settings[asset_name] = {
                 "active": True,
                 "strat": strat_type,
@@ -90,7 +115,6 @@ with st.sidebar.expander("⚙️ پارامترهای تخصصی هر روش"):
 
 # استراتژی مرید پوت و پریوت پوت
 def protective_put_payoff(price, entry, strike, premium, pos_size, opt_size):
-    # (مقدار دارایی × سود/زیان دارایی) + (مقدار قرارداد × سود آپشن) - هزینه پریمیوم
     pl_stock = (price - entry) * pos_size
     pl_option = np.maximum(strike - price, 0) * opt_size
     cost = premium * opt_size
@@ -99,17 +123,14 @@ def protective_put_payoff(price, entry, strike, premium, pos_size, opt_size):
     return pct
 
 def perpetual_put_payoff(price, entry, strike, premium, pos_size, opt_size):
-    # مشابه مرید پوت، اما بیمه همواره تمدید می‌شود (پریمیوم هر دوره کسر می‌شود)
     pl_stock = (price - entry) * pos_size
     pl_option = np.maximum(strike - price, 0) * opt_size
-    # فرض: هزینه پریمیوم برای تعداد دوره‌ها طبق اختلاف قیمت تا پایان
     n_periods = np.maximum(np.floor((entry - price) / (entry - strike)), 1)
     cost = premium * opt_size * n_periods
     total_pl = pl_stock + pl_option - cost
     pct = total_pl / (entry * pos_size)
     return pct
 
-# اعمال بیمه روی بازده دارایی‌ها
 def insured_returns(prices, asset_name):
     info = insurance_settings.get(asset_name, {})
     if not info.get("active", False):
@@ -167,7 +188,6 @@ if not prices_df.empty:
 
     tracking_index = insured_ret_resampled.mean(axis=1).values
 
-    # شبیه‌سازی پرتفو
     results = []
     for w in np.random.dirichlet(np.ones(len(asset_names)), n_portfolios):
         legal = True
@@ -286,7 +306,6 @@ if not prices_df.empty:
                 profit = protective_put_payoff(price_range, entry, strike, premium, pos_size, opt_size)
             else:
                 profit = perpetual_put_payoff(price_range, entry, strike, premium, pos_size, opt_size)
-            # سربه‌سر تقریبی
             idx_cross = np.argmin(np.abs(profit))
             breakeven = price_range[idx_cross]
             fig3 = go.Figure()
@@ -295,7 +314,6 @@ if not prices_df.empty:
                 line=dict(color="green"),
                 name="سود/زیان استراتژی"
             ))
-            # ناحیه سود سبز
             green_x = price_range[profit >= 0]
             green_y = profit[profit >= 0]*100
             if len(green_x) > 0:
@@ -304,7 +322,6 @@ if not prices_df.empty:
                     fill='tozeroy', fillcolor='rgba(0,255,0,0.15)', line=dict(color="rgba(0,0,0,0)"),
                     name="ناحیه سود"
                 ))
-            # ناحیه زیان قرمز
             red_x = price_range[profit < 0]
             red_y = profit[profit < 0]*100
             if len(red_x) > 0:
@@ -313,7 +330,6 @@ if not prices_df.empty:
                     fill='tozeroy', fillcolor='rgba(255,0,0,0.15)', line=dict(color="rgba(0,0,0,0)"),
                     name="ناحیه زیان"
                 ))
-            # خط سربه‌سر
             fig3.add_shape(type="line", x0=breakeven, x1=breakeven, y0=min(profit*100), y1=max(profit*100),
                            line=dict(color="blue", width=2, dash="dash"), name="سربه‌سر")
             fig3.add_annotation(
@@ -339,7 +355,6 @@ if not prices_df.empty:
                 - سود/زیان لحظه‌ای و درصد نمایش داده می‌شود<br>
                 </div>""", unsafe_allow_html=True)
 
-    # توضیح فارسی استراتژی‌ها
     st.markdown(
         """
         <div style='text-align:right;direction:rtl;'>
