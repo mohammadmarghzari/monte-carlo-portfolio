@@ -5,10 +5,10 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 
-st.set_page_config(page_title="تحلیل پرتفو و بیمه آپشن", layout="wide")
-st.markdown("<h1 style='text-align: right;'>📊 ابزار جامع تحلیل پرتفو با بیمه مرید پوت و پریوت پوت</h1>", unsafe_allow_html=True)
+st.set_page_config(page_title="تحلیل پرتفو با بیمه و پیش‌بینی", layout="wide")
+st.markdown("<h1 style='text-align: right;'>📊 ابزار جامع تحلیل پرتفو، بیمه و پیش‌بینی قیمت</h1>", unsafe_allow_html=True)
 
-# ۱. بازه زمانی تحلیل
+# === ۱. بازه زمانی تحلیل ===
 st.sidebar.markdown("<h3 style='text-align: right;'>۱. بازه زمانی تحلیل</h3>", unsafe_allow_html=True)
 date_range_mode = st.sidebar.radio("انتخاب بازه:", ["کل داده", "بازه دلخواه"], horizontal=True)
 date_start, date_end = None, None
@@ -18,7 +18,7 @@ if date_range_mode == "بازه دلخواه":
     if date_end < date_start:
         st.sidebar.error("تاریخ پایان باید بعد از تاریخ شروع باشد.")
 
-# ۲. بارگذاری و تنظیم دارایی‌ها و بیمه
+# === ۲. بارگذاری و تنظیم دارایی‌ها و بیمه ===
 uploaded_files = st.sidebar.file_uploader("آپلود فایل‌های CSV با ستون‌های Date و Price", type="csv", accept_multiple_files=True)
 asset_settings = {}
 insurance_settings = {}
@@ -31,37 +31,36 @@ if uploaded_files:
         min_w = st.sidebar.slider(f"حداقل وزن {asset_name} (%)", 0.0, 100.0, 0.0, 1.0, key=f"min_{asset_name}")/100
         max_w = st.sidebar.slider(f"حداکثر وزن {asset_name} (%)", 0.0, 100.0, 100.0, 1.0, key=f"max_{asset_name}")/100
         init_w = st.sidebar.slider(f"وزن اولیه {asset_name} (%)", min_w*100, max_w*100, ((min_w+max_w)/2)*100, 1.0, key=f"init_{asset_name}")/100
-        # بیمه
         insure = st.sidebar.checkbox(f"فعالسازی بیمه برای {asset_name}", key=f"insure_{asset_name}")
         if insure:
             strat_type = st.sidebar.selectbox(f"نوع بیمه {asset_name}", ["مرید پوت (Protective Put)", "پریوت پوت (Perpetual Put)"], key=f"stype_{asset_name}")
             entry_price = st.sidebar.number_input(
                 f"قیمت خرید دارایی پایه ({asset_name})",
-                min_value=0.00001, max_value=100.0,
-                value=1.0, step=0.00001, format="%.5f",
+                min_value=0.00001, max_value=1e7,
+                value=1000.0, step=0.00001, format="%.5f",
                 key=f"entry_{asset_name}"
             )
             strike = st.sidebar.number_input(
                 f"قیمت اعمال (استرایک) ({asset_name})",
-                min_value=0.00001, max_value=100.0,
-                value=0.95, step=0.00001, format="%.5f",
+                min_value=0.00001, max_value=1e7,
+                value=900.0, step=0.00001, format="%.5f",
                 key=f"strike_{asset_name}"
             )
             premium = st.sidebar.number_input(
                 f"پریمیوم (حق بیمه) ({asset_name})",
-                min_value=0.00001, max_value=100.0,
-                value=0.01, step=0.00001, format="%.5f",
+                min_value=0.00001, max_value=1e7,
+                value=1.0, step=0.00001, format="%.5f",
                 key=f"premium_{asset_name}"
             )
             pos_size = st.sidebar.number_input(
                 f"مقدار دارایی پایه ({asset_name})",
-                min_value=0.00001, max_value=100.0,
+                min_value=0.00001, max_value=1e7,
                 value=1.0, step=0.00001, format="%.5f",
                 key=f"possize_{asset_name}"
             )
             opt_size = st.sidebar.number_input(
                 f"مقدار قرارداد آپشن ({asset_name})",
-                min_value=0.00001, max_value=100.0,
+                min_value=0.00001, max_value=1e7,
                 value=1.0, step=0.00001, format="%.5f",
                 key=f"optsize_{asset_name}"
             )
@@ -78,13 +77,14 @@ if uploaded_files:
             insurance_settings[asset_name] = {"active": False}
         asset_settings[asset_name] = {"min": min_w, "max": max_w, "init": init_w}
 
+# === ۳. تنظیمات بازه بازده ===
 st.sidebar.markdown("---")
 st.sidebar.markdown("<h3 style='text-align: right;'>۳. تنظیمات بازه بازده</h3>", unsafe_allow_html=True)
 period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
 resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'شش‌ماهه': '2Q'}[period]
 annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}[period]
 
-# ۴. انتخاب روش بهینه‌سازی
+# === ۴. انتخاب روش بهینه‌سازی ===
 st.sidebar.markdown("---")
 st.sidebar.header("🎯 روش بهینه‌سازی پرتفو")
 all_methods = [
@@ -101,7 +101,6 @@ all_methods = [
 ]
 method = st.sidebar.selectbox("روش بهینه‌سازی:", all_methods)
 st.sidebar.markdown("---")
-
 with st.sidebar.expander("⚙️ پارامترهای تخصصی هر روش"):
     if method in ["کمینه CVaR (ارزش در معرض ریسک مشروط)"]:
         cvar_alpha = st.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
@@ -113,7 +112,7 @@ with st.sidebar.expander("⚙️ پارامترهای تخصصی هر روش"):
         target_return = 0.0
     n_portfolios = st.slider("تعداد شبیه‌سازی پرتفوها", 1000, 10000, 3000, 1000)
 
-# استراتژی مرید پوت و پریوت پوت
+# === توابع بیمه ===
 def protective_put_payoff(price, entry, strike, premium, pos_size, opt_size):
     pl_stock = (price - entry) * pos_size
     pl_option = np.maximum(strike - price, 0) * opt_size
@@ -148,6 +147,7 @@ def insured_returns(prices, asset_name):
     returns = np.diff(payoff)
     return pd.Series(returns, index=prices.index[1:])
 
+# === ۵. پردازش داده و محاسبات ===
 prices_df = pd.DataFrame()
 asset_names = []
 if uploaded_files:
@@ -160,6 +160,8 @@ if uploaded_files:
         df['Date'] = pd.to_datetime(df['date'])
         df['Price'] = pd.to_numeric(df['price'].astype(str).str.replace(",", ""), errors='coerce')
         df = df.dropna().set_index('Date')
+        if date_range_mode == "بازه دلخواه":
+            df = df.loc[(df.index >= pd.to_datetime(date_start)) & (df.index <= pd.to_datetime(date_end))]
         df = df[['Price']]
         name = file.name.split('.')[0]
         df.columns = [name]
@@ -189,6 +191,7 @@ if not prices_df.empty:
     tracking_index = insured_ret_resampled.mean(axis=1).values
 
     results = []
+    weights_all = []
     for w in np.random.dirichlet(np.ones(len(asset_names)), n_portfolios):
         legal = True
         for i, name in enumerate(asset_names):
@@ -224,41 +227,45 @@ if not prices_df.empty:
             "omega": omega, "drawdown": max_drawdown, "info": info, "kelly": kelly_growth,
             "risk_budget": risk_budget, "tracking": tracking_err
         })
+        weights_all.append(w)
 
-    # انتخاب پرتفو بهینه
+    # ===== انتخاب پرتفو بهینه =====
     if method == "واریانس میانگین (مرز کارا)":
-        best = max(results, key=lambda x: x["return"] / x["risk"])
-        explain = "پرتفو با بیشترین نسبت بازده به ریسک (Sharpe) روی مرز کارا."
+        best_index = np.argmax([r["return"]/r["risk"] for r in results])
+        explain = "در این سبک، هدف ما بیشترین نسبت بازده به ریسک (Sharpe Ratio) است. مرز کارا نشان‌دهنده بهترین ترکیب بازده و ریسک برای هر سطح ریسک است."
     elif method == "کمینه CVaR (ارزش در معرض ریسک مشروط)":
-        best = min(results, key=lambda x: x["cvar"])
-        explain = "پرتفو با کمترین مقدار CVaR (خطر دنباله)."
+        best_index = np.argmin([r["cvar"] for r in results])
+        explain = "این روش پرتفو با کمترین ارزش در معرض ریسک مشروط (CVaR) را انتخاب می‌کند تا احتمال ضرر شدید کاهش یابد."
     elif method == "برابری ریسک":
-        best = min(results, key=lambda x: x["risk_budget"])
-        explain = "پرتفو با نزدیک‌ترین سهم ریسک مساوی بین دارایی‌ها."
+        best_index = np.argmin([r["risk_budget"] for r in results])
+        explain = "در این سبک، هدف مساوی‌کردن سهم ریسک دارایی‌ها در پرتفو است."
     elif method == "حداقل خطای ردیابی":
-        best = min(results, key=lambda x: x["tracking"])
-        explain = "پرتفو با کمترین خطای ردیابی نسبت به معیار پرتفو (میانگین دارایی‌ها)."
+        best_index = np.argmin([r["tracking"] for r in results])
+        explain = "هدف کاهش انحراف پرتفو نسبت به شاخص معیار (مثلاً میانگین بازار) است."
     elif method == "بیشینه نسبت اطلاعات":
-        best = max(results, key=lambda x: x["info"])
-        explain = "پرتفو با بیشترین نسبت اطلاعات نسبت به معیار پرتفو."
+        best_index = np.argmax([r["info"] for r in results])
+        explain = "پرتفویی انتخاب می‌شود که بیشترین نسبت اطلاعات (Information Ratio) را نسبت به پرتفو معیار داشته باشد."
     elif method == "بیشینه نرخ رشد هندسی (Kelly)":
-        best = max(results, key=lambda x: x["kelly"])
-        explain = "پرتفو با بیشترین رشد هندسی مورد انتظار (معیار Kelly)."
+        best_index = np.argmax([r["kelly"] for r in results])
+        explain = "در این روش، بیشترین نرخ رشد هندسی سرمایه (Kelly Criterion) هدف است."
     elif method == "بیشینه نسبت سورتینو":
-        best = max(results, key=lambda x: x["sortino"])
-        explain = "پرتفو با بیشترین نسبت سورتینو با حداقل بازده مقبول."
+        best_index = np.argmax([r["sortino"] for r in results])
+        explain = "این سبک پرتفو با بیشترین نسبت سورتینو (توجه ویژه به زیان‌های پایین‌تر از بازده هدف) را انتخاب می‌کند."
     elif method == "بیشینه نسبت امگا":
-        best = max(results, key=lambda x: x["omega"])
-        explain = "پرتفو با بیشترین نسبت امگا (فراتر از بازده مقبول)."
+        best_index = np.argmax([r["omega"] for r in results])
+        explain = "این روش پرتفو با بیشترین نسبت امگا (Omega) را انتخاب می‌کند که نشان‌دهنده پتانسیل سود به زیان است."
     elif method == "کمترین افت سرمایه":
-        best = max(results, key=lambda x: x["drawdown"])
-        explain = "پرتفو با کمترین افت سرمایه (حداقل Drawdown)."
+        best_index = np.argmax([r["drawdown"] for r in results])
+        explain = "در این سبک، پرتفو با کمترین افت سرمایه (Drawdown) انتخاب می‌شود تا کاهش سرمایه به حداقل برسد."
     elif method == "Black-Litterman":
-        best = max(results, key=lambda x: x["return"] / x["risk"])
-        explain = "مدل Black-Litterman (در این نسخه: مرز کارا بدون دیدگاه خاص)."
+        best_index = np.argmax([r["return"]/r["risk"] for r in results])
+        explain = "در این مدل دیدگاه‌های کاربر لحاظ می‌شود (در این نسخه: مشابه مرز کارا)."
     else:
-        best = results[0]
+        best_index = 0
         explain = "-"
+
+    best = results[best_index]
+    best_weights = weights_all[best_index]
 
     st.markdown(f"<div style='text-align:right;'><b>روش بهینه‌سازی:</b> {method}</div>", unsafe_allow_html=True)
     st.markdown(f"<div dir='rtl'>{explain}</div>", unsafe_allow_html=True)
@@ -273,24 +280,44 @@ if not prices_df.empty:
     st.markdown(f"<div style='text-align:right;'>📊 <b>تنوع ریسک:</b> {best['risk_budget']:.2f}</div>", unsafe_allow_html=True)
     st.markdown(f"<div style='text-align:right;'>🔁 <b>خطای ردیابی:</b> {best['tracking']:.4f}</div>", unsafe_allow_html=True)
 
+    # ==== نمایش وزن پرتفو بهینه ====
     st.markdown("<h3 style='text-align:right;'>📌 نمودار توزیع وزن پرتفو بهینه</h3>", unsafe_allow_html=True)
     fig = go.Figure(data=[go.Pie(labels=asset_names, values=best['weights'], hole=0.5)])
     fig.update_layout(title="توزیع وزن دارایی‌ها")
     st.plotly_chart(fig, use_container_width=True)
+    st.markdown(
+        "<div style='text-align:right;'>این نمودار سهم هر دارایی در پرتفو بهینه را نمایش می‌دهد. درصد وزنی هر دارایی در دایره مشخص است.</div>",
+        unsafe_allow_html=True
+    )
 
-    st.markdown("<h3 style='text-align:right;'>🌈 نمودار مرز کارا شبیه‌سازی‌شده</h3>", unsafe_allow_html=True)
+    # ==== مرز کارا و موقعیت پرتفو بهینه ====
+    st.markdown("<h3 style='text-align:right;'>🌈 نمودار مرز کارا با موقعیت پرتفو بهینه</h3>", unsafe_allow_html=True)
     df = pd.DataFrame(results)
     fig2 = px.scatter(df, x="risk", y="return", color="sortino",
                       hover_data=["info", "omega", "cvar"], title="مرز کارا با رنگ‌بندی نسبت سورتینو")
+    fig2.add_trace(go.Scatter(
+        x=[best["risk"]], y=[best["return"]],
+        mode="markers+text",
+        marker=dict(size=16, color="red"),
+        text=["پرتفو بهینه"],
+        textposition="top center",
+        name="پرتفو بهینه"
+    ))
     st.plotly_chart(fig2, use_container_width=True)
+    st.markdown(
+        "<div style='text-align:right;'>هر نقطه یک پرتفو شبیه‌سازی‌شده را نشان می‌دهد. نقطه قرمز موقعیت پرتفو بهینه بر اساس سبک انتخابی است.</div>",
+        unsafe_allow_html=True
+    )
 
+    # ==== جدول وزن پرتفو ====
     st.markdown("<h3 style='text-align:right;'>📋 جدول وزن پرتفو بهینه</h3>", unsafe_allow_html=True)
     table = pd.DataFrame({"دارایی": asset_names, "وزن بهینه (%)": np.array(best['weights'])*100,
                           "حداقل وزن (%)": [asset_settings[n]["min"]*100 for n in asset_names],
                           "حداکثر وزن (%)": [asset_settings[n]["max"]*100 for n in asset_names]})
     st.dataframe(table.set_index("دارایی"), use_container_width=True, height=300)
+    st.markdown("<div style='text-align:right;'>وزن بهینه هر دارایی به درصد و محدودیت‌های تعیین‌شده در جدول بالا نمایش داده شده است.</div>", unsafe_allow_html=True)
 
-    # نمودار استراتژی بیمه برای هر دارایی
+    # ==== نمودار استراتژی بیمه برای هر دارایی ====
     st.markdown("<h3 style='text-align:right;'>🛡️ نمودار سود/زیان استراتژی بیمه (مرید پوت / پریوت پوت)</h3>", unsafe_allow_html=True)
     for name in asset_names:
         info = insurance_settings.get(name, {})
@@ -346,32 +373,45 @@ if not prices_df.empty:
             st.plotly_chart(fig3, use_container_width=True)
             st.markdown(
                 f"""<div style='text-align:right;'>
-                <b>ویژگی نمودار:</b><br>
-                - محور افقی: قیمت دارایی پایه<br>
-                - محور عمودی: درصد سود/زیان<br>
-                - ناحیه سبز: سود (سربه‌سر به بالا)<br>
-                - ناحیه قرمز: زیان (سربه‌سر به پایین)<br>
-                - خط آبی: نقطه سربه‌سر<br>
-                - سود/زیان لحظه‌ای و درصد نمایش داده می‌شود<br>
+                <b>توضیح:</b> محور افقی قیمت دارایی، محور عمودی درصد سود/زیان کل است. بالاتر از خط سربه‌سر سبز و پایین‌تر قرمز. بیمه مرید پوت زیان را محدود و سود را بعد از کسر حق بیمه نشان می‌دهد.
                 </div>""", unsafe_allow_html=True)
 
-    st.markdown(
-        """
-        <div style='text-align:right;direction:rtl;'>
-        <h3>راهنمای استراتژی بیمه:</h3>
-        <b>مرید پوت (Protective Put):</b> خرید دارایی و خرید اختیار فروش با قیمت اعمال مشخص. اگر قیمت پایین بیاید، اختیار فروش ضرر را محدود می‌کند و ریسک را کاهش می‌دهد.<br>
-        <b>پریوت پوت (Perpetual Put):</b> مشابه مرید پوت است اما اختیار فروش به صورت دائمی تمدید می‌شود و همیشه بیمه فعال است.<br>
-        <br>
-        پارامترهای هر دارایی:<br>
-        - قیمت خرید دارایی پایه<br>
-        - قیمت اعمال اختیار فروش (استرایک)<br>
-        - پریمیوم (حق بیمه)<br>
-        - مقدار دارایی پایه<br>
-        - مقدار قرارداد آپشن<br>
-        <br>
-        بازه مقادیر مجاز: 0.00001 تا 100 <br>
-        </div>
-        """, unsafe_allow_html=True)
+    # ==== پیش‌بینی قیمت برای پرتفو بهینه ====
+    st.markdown("<h3 style='text-align:right;'>🔮 پیش‌بینی کمترین و بیشترین قیمت پرتفو بهینه</h3>", unsafe_allow_html=True)
+    # با فرض توزیع نرمال بازده پرتفو بهینه
+    mu = best['return'] / annual_factor
+    sigma = best['risk'] / np.sqrt(annual_factor)
+    last_prices = resampled_prices.iloc[-1].values
+    port_price = np.dot(best_weights, last_prices)
+    periods = 12  # ۱۲ دوره (مثلاً ماهانه)
+    simulated = np.cumprod(1 + np.random.normal(mu, sigma, (1000, periods)), axis=1) * port_price
+    min_pred = simulated.min(axis=1).mean()
+    max_pred = simulated.max(axis=1).mean()
+    st.markdown(f"<div style='text-align:right;'>با توجه به بازده و ریسک پرتفو بهینه، <b>کمترین قیمت مورد انتظار پرتفو</b> در دوره آینده: <span style='color:red'>{min_pred:,.0f}</span><br> <b>بیشترین قیمت مورد انتظار پرتفو</b>: <span style='color:green'>{max_pred:,.0f}</span></div>", unsafe_allow_html=True)
+    fig_pred = go.Figure()
+    fig_pred.add_trace(go.Box(y=simulated[:,-1], name="قیمت پایان دوره", boxmean=True, marker_color='blue'))
+    fig_pred.add_trace(go.Scatter(y=[min_pred]*periods, x=list(range(1,periods+1)), mode="lines", name="کمترین قیمت میانگین", line=dict(color="red", dash="dot")))
+    fig_pred.add_trace(go.Scatter(y=[max_pred]*periods, x=list(range(1,periods+1)), mode="lines", name="بیشترین قیمت میانگین", line=dict(color="green", dash="dot")))
+    fig_pred.update_layout(title="پیش‌بینی قیمت پرتفو بهینه (شبیه‌سازی مونت‌کارلو)",
+                          xaxis_title="تعداد دوره آینده", yaxis_title="قیمت پیش‌بینی‌شده", showlegend=True)
+    st.plotly_chart(fig_pred, use_container_width=True)
+    st.markdown("<div style='text-align:right;'>این نمودار توزیع انتهای قیمت پرتفو شبیه‌سازی‌شده را بر اساس بازده و ریسک فعلی نمایش می‌دهد. خطوط قرمز و سبز حداقل و حداکثر میانگین قیمت را نشان می‌دهند.</div>", unsafe_allow_html=True)
+
+    # ==== توضیح کلی سبک‌ها ====
+    st.markdown("""
+    <div style='text-align:right;direction:rtl;'>
+    <h4>راهنمای کوتاه سبک‌های بهینه‌سازی:</h4>
+    <b>مرز کارا:</b> بهترین ترکیب بازده و ریسک.<br>
+    <b>CVaR:</b> کمترین ریسک زیان شدید.<br>
+    <b>برابری ریسک:</b> توزیع ریسک مساوی بین دارایی‌ها.<br>
+    <b>خطای ردیابی:</b> کمترین فاصله از شاخص مبنا.<br>
+    <b>نسبت اطلاعات:</b> ماکزیمم اختلاف بازده نسبت به ریسک اضافی.<br>
+    <b>Kelly:</b> بیشترین رشد سرمایه.<br>
+    <b>Sortino:</b> ماکزیمم سود نسبت به زیانهای پایین‌تر از هدف.<br>
+    <b>Omega:</b> بیشترین نسبت سود به زیان.<br>
+    <b>Drawdown:</b> کمترین افت سرمایه.<br>
+    </div>
+    """, unsafe_allow_html=True)
 
 else:
     st.info("برای شروع، فایل‌های داده با ستون‌های 'Date' و 'Price' را آپلود کنید.")
