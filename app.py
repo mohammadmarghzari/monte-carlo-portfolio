@@ -81,8 +81,9 @@ if uploaded_files:
         df['Date'] = pd.to_datetime(df['date'])
         df['Price'] = pd.to_numeric(df['price'].astype(str).str.replace(",", ""), errors='coerce')
         df = df.dropna().set_index('Date')
-        if date_range_mode == "بازه دلخواه":
-            df = df.loc[(df.index >= pd.to_datetime(date_start)) & (df.index <= pd.to_datetime(date_end))]
+        # فقط ستون Price را نگه دار تا تعداد ستون‌ها ۱ باشد
+        df = df[['Price']]
+        # حالا نام ستون را به نام دارایی تغییر بده
         name = file.name.split('.')[0]
         df.columns = [name]
         asset_names.append(name)
