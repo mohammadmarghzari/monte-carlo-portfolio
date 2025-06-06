@@ -1,19 +1,12 @@
-# ابزار جامع پرتفو: بهینه‌سازی چندگانه با همه فیچرهای حرفه‌ای
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-import yfinance as yf
-import json
-import base64
 from datetime import datetime
 
 st.set_page_config(page_title="تحلیل پرتفو و بهینه‌سازی پیشرفته", layout="wide")
 st.title("📊 ابزار جامع تحلیل پرتفو با بهینه‌سازی پیشرفته")
-
-st.sidebar.header("📥 بارگذاری داده‌ها")
 
 # ۱. انتخاب بازه زمانی دلخواه
 st.sidebar.markdown("### ۱. بازه زمانی تحلیل")
@@ -40,7 +33,6 @@ if uploaded_files:
         init_w = st.sidebar.slider(f"وزن اولیه {asset_name} (%)", min_w*100, max_w*100, ((min_w+max_w)/2)*100, 1.0, key=f"init_{asset_name}")/100
         asset_settings[asset_name] = {"min": min_w, "max": max_w, "init": init_w}
 
-# ۳. انتخاب بازه محاسبه بازده
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ۳. تنظیمات بازه بازده")
 period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
@@ -65,7 +57,6 @@ all_methods = [
 method = st.sidebar.selectbox("روش بهینه‌سازی:", all_methods)
 st.sidebar.markdown("---")
 
-# پارامترهای خاص هر روش
 with st.sidebar.expander("⚙️ پارامترهای تخصصی هر روش"):
     if method in ["کمینه CVaR (ارزش در معرض ریسک مشروط)"]:
         cvar_alpha = st.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
@@ -75,11 +66,6 @@ with st.sidebar.expander("⚙️ پارامترهای تخصصی هر روش"):
         target_return = st.slider("حداقل بازده قابل قبول (%)", 0.0, 20.0, 5.0, 0.5)/100
     else:
         target_return = 0.0
-    if method in ["حداقل خطای ردیابی", "بیشینه نسبت اطلاعات"]:
-        st.write("برای این روش، یک معیار ردیابی نیاز است (مثلاً میانگین پرتفوها).")
-        # فرض بر این است که میانگین همه دارایی‌ها معیار است.
-    if method == "Black-Litterman":
-        st.info("مدل Black-Litterman نیازمند ورود دیدگاه‌های کاربر است. (فعلاً دیدگاه خاصی وارد نشده، می‌توانید این حالت را توسعه دهید)")
     n_portfolios = st.slider("تعداد شبیه‌سازی پرتفوها", 1000, 10000, 3000, 1000)
 
 # ۵. پردازش داده‌ها
@@ -117,13 +103,10 @@ if not prices_df.empty:
     st.subheader("📊 بازده دارایی‌ها")
     st.dataframe(returns_df.tail())
 
-    # معیار ردیابی (میانگین همه دارایی‌ها)
     tracking_index = returns_df.mean(axis=1).values
 
-    # ۶. شبیه‌سازی پرتفوها
     results = []
     for w in np.random.dirichlet(np.ones(len(asset_names)), n_portfolios):
-        # محدودیت وزن
         legal = True
         for i, name in enumerate(asset_names):
             min_w, max_w = asset_settings[name]["min"], asset_settings[name]["max"]
@@ -131,49 +114,34 @@ if not prices_df.empty:
                 legal = False
         if not legal:
             continue
-        # بازده و ریسک
         port_ret = np.dot(w, mean_returns)
         port_risk = np.sqrt(np.dot(w.T, np.dot(cov_matrix, w)))
-        # CVaR
         sims = np.random.multivariate_normal(mean_returns / annual_factor, cov_matrix / annual_factor, 1000)
         sim_returns = np.dot(sims, w)
         var = np.percentile(sim_returns, (1 - cvar_alpha) * 100)
         cvar = sim_returns[sim_returns <= var].mean() if np.any(sim_returns <= var) else var
-        # Sortino
         downside = returns_df.copy()
         downside[downside > target_return] = 0
         downside_std = np.sqrt(np.dot(w.T, np.dot(downside.cov() * annual_factor, w)))
         sortino = (port_ret - target_return) / downside_std if downside_std > 0 else 0
-        # Omega
         port_returns = np.dot(returns_df.values, w)
         omega = np.sum(np.maximum(port_returns - target_return, 0)) / (np.abs(np.sum(np.minimum(port_returns - target_return, 0))) + 1e-8)
-        # Drawdown
         cum = (1 + port_returns).cumprod()
         peak = np.maximum.accumulate(cum)
         drawdowns = (cum - peak) / peak
         max_drawdown = drawdowns.min()
-        # Info Ratio
         excess = returns_df.sub(mean_returns.mean(), axis=1)
         info = (port_ret - mean_returns.mean()) / (np.std(np.dot(excess.values, w)) + 1e-8)
-        # Kelly
         kelly_growth = np.mean(np.log1p(port_returns))
-        # Risk parity (برابری ریسک)
         contrib = w * np.dot(cov_matrix, w)
         risk_budget = np.std(contrib) / (np.mean(contrib) + 1e-8)
-        # Tracking error
         tracking_err = np.std(port_returns - tracking_index)
-        # Black-Litterman (ساده؛ فقط میانگین واریانس)
-        if method == "Black-Litterman":
-            # پیاده‌سازی دقیق نیازمند دیدگاه کاربر است؛ فعلاً همان میانگین واریانس
-            bl_ret = port_ret
-            bl_risk = port_risk
         results.append({
             "weights": w, "return": port_ret, "risk": port_risk, "cvar": cvar, "sortino": sortino,
             "omega": omega, "drawdown": max_drawdown, "info": info, "kelly": kelly_growth,
             "risk_budget": risk_budget, "tracking": tracking_err
         })
 
-    # ۷. انتخاب پرتفو بهینه بسته به روش
     if method == "واریانس میانگین (مرز کارا)":
         best = max(results, key=lambda x: x["return"] / x["risk"])
         explain = "پرتفو با بیشترین نسبت بازده به ریسک (Sharpe) روی مرز کارا."
@@ -208,7 +176,6 @@ if not prices_df.empty:
         best = results[0]
         explain = "-"
 
-    # ۸. نمایش نتایج
     st.success(f"روش بهینه‌سازی: {method}")
     st.markdown(f"<div dir='rtl'>{explain}</div>", unsafe_allow_html=True)
     st.markdown(f"**📈 بازده پرتفو:** {best['return']:.2%}")
