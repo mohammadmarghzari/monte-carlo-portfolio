@@ -36,32 +36,37 @@ if uploaded_files:
             strat_type = st.sidebar.selectbox(f"نوع بیمه {asset_name}", ["مرید پوت (Protective Put)", "پریوت پوت (Perpetual Put)"], key=f"stype_{asset_name}")
             entry_price = st.sidebar.number_input(
                 f"قیمت خرید دارایی پایه ({asset_name})",
-                min_value=0.00001, max_value=1e7,
-                value=1000.0, step=0.00001, format="%.5f",
+                min_value=0.00000001, max_value=1e18,
+                value=1000.0, step=0.00000001, format="%.8f",
+                help="عدد اعشاری تا 8 رقم اعشار، قیمت دارایی پایه را وارد کنید (مثال: 2450.5 یا 0.12345678)",
                 key=f"entry_{asset_name}"
             )
             strike = st.sidebar.number_input(
                 f"قیمت اعمال (استرایک) ({asset_name})",
-                min_value=0.00001, max_value=1e7,
-                value=900.0, step=0.00001, format="%.5f",
+                min_value=0.00000001, max_value=1e18,
+                value=900.0, step=0.00000001, format="%.8f",
+                help="عدد اعشاری تا 8 رقم اعشار، قیمت استرایک را وارد کنید (مثال: 2000 یا 0.00012345)",
                 key=f"strike_{asset_name}"
             )
             premium = st.sidebar.number_input(
                 f"پریمیوم (حق بیمه) ({asset_name})",
-                min_value=0.00001, max_value=1e7,
-                value=1.0, step=0.00001, format="%.5f",
+                min_value=0.00000001, max_value=1e18,
+                value=1.0, step=0.00000001, format="%.8f",
+                help="عدد اعشاری تا 8 رقم اعشار، مقدار حق بیمه را وارد کنید",
                 key=f"premium_{asset_name}"
             )
             pos_size = st.sidebar.number_input(
                 f"مقدار دارایی پایه ({asset_name})",
-                min_value=0.00001, max_value=1e7,
-                value=1.0, step=0.00001, format="%.5f",
+                min_value=0.00000001, max_value=1e18,
+                value=1.0, step=0.00000001, format="%.8f",
+                help="عدد (صحیح یا اعشاری) مقدار دارایی پایه، مثال: 1 یا 0.25 یا 1000",
                 key=f"possize_{asset_name}"
             )
             opt_size = st.sidebar.number_input(
                 f"مقدار قرارداد آپشن ({asset_name})",
-                min_value=0.00001, max_value=1e7,
-                value=1.0, step=0.00001, format="%.5f",
+                min_value=0.00000001, max_value=1e18,
+                value=1.0, step=0.00000001, format="%.8f",
+                help="عدد (صحیح یا اعشاری) تعداد قرارداد آپشن، مثال: 1 یا 0.5 یا 100",
                 key=f"optsize_{asset_name}"
             )
             insurance_settings[asset_name] = {
@@ -367,7 +372,7 @@ if not prices_df.empty:
                 yaxis_title="درصد سود/زیان (%)",
                 title=f"استراتژی بیمه برای {name}",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                xaxis=dict(tickformat=".4f"),
+                xaxis=dict(tickformat=".8f"),
                 yaxis=dict(tickformat=".2f")
             )
             st.plotly_chart(fig3, use_container_width=True)
@@ -378,16 +383,15 @@ if not prices_df.empty:
 
     # ==== پیش‌بینی قیمت برای پرتفو بهینه ====
     st.markdown("<h3 style='text-align:right;'>🔮 پیش‌بینی کمترین و بیشترین قیمت پرتفو بهینه</h3>", unsafe_allow_html=True)
-    # با فرض توزیع نرمال بازده پرتفو بهینه
     mu = best['return'] / annual_factor
     sigma = best['risk'] / np.sqrt(annual_factor)
     last_prices = resampled_prices.iloc[-1].values
     port_price = np.dot(best_weights, last_prices)
-    periods = 12  # ۱۲ دوره (مثلاً ماهانه)
+    periods = 12
     simulated = np.cumprod(1 + np.random.normal(mu, sigma, (1000, periods)), axis=1) * port_price
     min_pred = simulated.min(axis=1).mean()
     max_pred = simulated.max(axis=1).mean()
-    st.markdown(f"<div style='text-align:right;'>با توجه به بازده و ریسک پرتفو بهینه، <b>کمترین قیمت مورد انتظار پرتفو</b> در دوره آینده: <span style='color:red'>{min_pred:,.0f}</span><br> <b>بیشترین قیمت مورد انتظار پرتفو</b>: <span style='color:green'>{max_pred:,.0f}</span></div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align:right;'>با توجه به بازده و ریسک پرتفو بهینه، <b>کمترین قیمت مورد انتظار پرتفو</b> در دوره آینده: <span style='color:red'>{min_pred:,.8f}</span><br> <b>بیشترین قیمت مورد انتظار پرتفو</b>: <span style='color:green'>{max_pred:,.8f}</span></div>", unsafe_allow_html=True)
     fig_pred = go.Figure()
     fig_pred.add_trace(go.Box(y=simulated[:,-1], name="قیمت پایان دوره", boxmean=True, marker_color='blue'))
     fig_pred.add_trace(go.Scatter(y=[min_pred]*periods, x=list(range(1,periods+1)), mode="lines", name="کمترین قیمت میانگین", line=dict(color="red", dash="dot")))
