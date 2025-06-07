@@ -5,16 +5,12 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 from statsmodels.tsa.arima.model import ARIMA
-import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="تحلیل پرتفو و پیش‌بینی", layout="wide")
 st.title("📊 Portfolio360 - ابزار تحلیل پرتفو و پیش‌بینی قیمت")
 
-# فقط پارامترهای ضروری باقی می‌ماند
-
-# پارامترهای ویژه هر سبک
 st.sidebar.markdown("---")
 st.sidebar.subheader("پارامترهای سبک‌های تخصصی")
 cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR/VaR", 0.80, 0.99, 0.95, 0.01)
@@ -29,7 +25,6 @@ prices_df = pd.DataFrame()
 asset_names = []
 weight_settings = {}
 
-# اسامی متداول ستون قیمت بسته
 price_columns_possible = [
     "Adj Close", "adj close", "AdjClose", "adjclose",
     "Close", "close", "Last", "last", "Price", "price",
@@ -92,11 +87,10 @@ if not prices_df.empty:
     def portfolio_risk(weights):
         return np.sqrt(np.dot(weights.T, np.dot(cov, weights)))
 
-    # فقط بهینه‌سازی ساده برای مثال: بیشترین شارپ
-    n_portfolios = 5000  # مقدار ثابت (قابل تغییر در کد)
-    min_risk_user = 0.1
-    max_risk_user = 1.0
-    # محدودیت وزن آزاد (۰ تا ۱)
+    n_portfolios = 5000
+    min_risk_user = 0.0
+    max_risk_user = 2.0
+
     for name in asset_names:
         weight_settings[name] = {'min': 0.0, 'max': 1.0}
 
@@ -127,7 +121,7 @@ if not prices_df.empty:
             port_ret = portfolio_return(w)
             port_risk = portfolio_risk(w)
             port_sorted = np.dot(returns.values, w)
-            target_return = 0.05  # مقدار ثابت (۵ درصد)
+            target_return = 0.05
             downside = port_sorted[port_sorted < target_return]
             sortino = (port_ret - target_return) / (np.std(downside) + 1e-8) if len(downside) > 0 else 0
             omega = np.sum(port_sorted > target_return) / (np.abs(np.sum(port_sorted < target_return)) + 1e-8)
@@ -144,13 +138,24 @@ if not prices_df.empty:
             })
         df_res = pd.DataFrame(results)
         df_res = df_res[(df_res["risk"] >= min_risk_user) & (df_res["risk"] <= max_risk_user)]
+
+        # Always show style title and description
+        st.markdown(f"---\n### {style} : {style_desc}")
+        if style in ["CVaR", "VaR"]:
+            st.info(f"سطح اطمینان: {int(cvar_alpha*100)}٪")
+
         if df_res.empty:
-            st.warning(
-                f"در سبک {style} هیچ سبدی در محدوده ریسک پیدا نشد! "
-                "\n\n"
-                "- بازه ریسک یا پارامترهای کد را تغییر دهید.\n"
+            st.warning(f"هیچ سبدی برای این سبک در محدوده ریسک پیدا نشد!")
+            # Show empty English chart for style
+            fig2 = px.scatter(
+                x=[], y=[],
+                labels={'risk': 'Portfolio Risk (%)', 'return': 'Portfolio Return (%)', 'sharpe': 'Sharpe Ratio'},
+                title=f"Efficient Frontier ({style})"
             )
+            fig2.update_layout(font=dict(family="DejaVu Sans", size=14))
+            st.plotly_chart(fig2, use_container_width=True)
             continue
+
         if style == "Sharpe":
             best = df_res.loc[df_res["sharpe"].idxmax()]
             best_desc = "بیشترین نسبت شارپ"
@@ -175,11 +180,7 @@ if not prices_df.empty:
         all_results[style] = (df_res, best)
         if best["drawdown"] >= -0.3:
             all_best.append((style, best, best_desc))
-        st.markdown(f"---\n### {style} : {best_desc}")
-        st.markdown(f"**{style_desc}**")
-        if style in ["CVaR", "VaR"]:
-            st.info(f"سطح اطمینان: {int(cvar_alpha*100)}٪")
-        # نمودار کارا فقط انگلیسی و حرفه‌ای
+
         fig2 = px.scatter(
             df_res, x=df_res["risk"]*100, y=df_res["return"]*100, color="sharpe",
             labels={'risk': 'Portfolio Risk (%)', 'return': 'Portfolio Return (%)', 'sharpe': 'Sharpe Ratio'},
@@ -192,11 +193,10 @@ if not prices_df.empty:
         ))
         fig2.update_layout(font=dict(family="DejaVu Sans", size=14))
         st.plotly_chart(fig2, use_container_width=True)
-        # جدول وزن پرتفو
+
         st.markdown("#### جدول وزن پرتفو (سبد بهینه)")
         dfw = pd.DataFrame({'دارایی': asset_names, 'وزن (%)': np.round(best['weights']*100, 2)})
         st.dataframe(dfw.set_index('دارایی'), use_container_width=True)
-        # خروجی‌ها
         st.markdown(f"""
         - **بازده سالانه:** {best['return']*100:.2f}%
         - **ریسک سالانه:** {best['risk']*100:.2f}%
@@ -212,7 +212,6 @@ if not prices_df.empty:
             "در صورت مشاهده خطا، بازه ریسک یا پارامترهای کد را تغییر دهید."
         )
 
-    # پیش‌بینی قیمت انگلیسی و حرفه‌ای
     st.markdown("---\n## 🤖 Price Forecast for Each Asset (ARIMA Model)")
     pred_periods = st.slider("Forecast Periods (per asset)", 3, 24, 12, 1)
     for name in asset_names:
@@ -255,7 +254,7 @@ if not prices_df.empty:
     st.markdown("""
     <div dir="rtl" style="text-align:right;">
     <b>راهنما:</b><br>
-    - همه سبک‌های پرتفو مقایسه می‌شوند.<br>
+    - همه سبک‌های پرتفو مقایسه و حتی اگر پرتفوی در بازه نبود عنوان و نمودار انگلیسی نمایش داده می‌شود.<br>
     - نمودارها انگلیسی و حرفه‌ای است.<br>
     - بقیه ابزار کاملاً فارسی است.<br>
     </div>
