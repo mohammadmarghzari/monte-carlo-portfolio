@@ -6,8 +6,8 @@ import plotly.express as px
 from datetime import datetime
 import yfinance as yf
 
-st.set_page_config(page_title="Portfolio360 v8 - تحلیل پرتفو و مدیریت ریسک", layout="wide")
-st.title("📊 Portfolio360 v8 - ابزار حرفه‌ای تحلیل پرتفو و مدیریت ریسک")
+st.set_page_config(page_title="Portfolio360 v9 - تحلیل پرتفو و مدیریت ریسک", layout="wide")
+st.title("📊 Portfolio360 v9 - ابزار حرفه‌ای تحلیل پرتفو و مدیریت ریسک")
 
 # ----- تنظیمات سایدبار -----
 st.sidebar.header("🔧 تنظیمات تحلیل")
@@ -34,7 +34,7 @@ n_portfolios = st.sidebar.slider("تعداد پرتفوهای شبیه‌ساز�
 # بارگذاری داده‌ها (CSV یا یاهو فاینانس)
 st.sidebar.markdown("---")
 uploaded_files = st.sidebar.file_uploader(
-    "آپلود فایل CSV قیمت دارایی‌ها (ستون تاریخ و قیمت - Adj Close یا Close)", 
+    "آپلود فایل CSV قیمت دارایی‌ها (ستون تاریخ و قیمت - هر نام متداول برای قیمت پایانی)", 
     type=['csv'], 
     accept_multiple_files=True
 )
@@ -57,23 +57,37 @@ with st.sidebar.expander("دریافت داده از یاهو فاینانس"):
                 df.to_csv(f"{t}.csv", index=False)
                 st.success(f"داده {t} با موفقیت آماده شد. می‌توانید آن را به ابزار آپلود کنید.")
 
-# پردازش فایل‌های آپلودشده با اولویت Adj Close و فقط نام فایل
+# پردازش فایل‌های آپلودشده با اولویت Adj Close و قبول سایر اسامی متداول قیمت پایانی
 prices_df = pd.DataFrame()
 asset_names = []
 weight_settings = {}
+
+# لیست اسامی متداول برای ستون قیمت پایانی
+price_columns_possible = [
+    "Adj Close", "adj close", "AdjClose", "adjclose",
+    "Close", "close", "Last", "last", "Price", "price",
+    "Close Price", "close price", "End", "end", "پایانی", "قیمت پایانی"
+]
 
 if uploaded_files:
     for file in uploaded_files:
         name = file.name.split('.')[0]
         df = pd.read_csv(file)
-        # جستجوی ستون قیمت تعدیل‌شده با اولویت Adj Close سپس Close (حساس به حروف)
+        # جستجوی ستون قیمت پایانی با اولویت بیشتر و پشتیبانی از اسامی فارسی
         price_col = None
-        for col in ["Adj Close", "adj close", "AdjClose", "adjclose", "Close", "close"]:
+        for col in price_columns_possible:
             if col in df.columns:
                 price_col = col
                 break
         if price_col is None:
-            st.error(f"فایل {file.name} ستون 'Adj Close' یا 'Close' ندارد!")
+            st.error(
+                f"فایل {file.name} هیچ‌کدام از ستون‌های متداول قیمت پایانی را ندارد!"
+                f"\nستون‌های فعلی فایل: {list(df.columns)}"
+                f"\nستون‌های مورد انتظار: {price_columns_possible}"
+            )
+            continue
+        if "Date" not in df.columns:
+            st.error(f"فایل {file.name} باید دارای ستون تاریخ (Date) باشد! ستون‌های فعلی: {list(df.columns)}")
             continue
         df = df[["Date", price_col]].rename(columns={price_col: name})
         df["Date"] = pd.to_datetime(df["Date"])
@@ -198,7 +212,7 @@ if not prices_df.empty:
     <div dir="rtl" style="text-align:right;">
     <b>یادآوری:</b><br>
     - فایل هر دارایی را فقط با نام فایل (بدون نیاز به مسیر کامل) آپلود کنید.<br>
-    - قیمت پایانی تعدیل‌شده (Adj Close) به صورت هوشمند استخراج و استفاده می‌شود.<br>
+    - قیمت پایانی تعدیل‌شده (Adj Close) یا هر قیمت بسته متداول، به صورت هوشمند استخراج و استفاده می‌شود.<br>
     - تمامی نتایج به درصد نمایش داده می‌شود.<br>
     - مرز کارا، نمودار وزنی و شاخص‌های مهم پرتفو کاملا حرفه‌ای و کاربردی ارائه شده است.<br>
     </div>
