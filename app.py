@@ -30,28 +30,32 @@ with st.expander("📘 راهنمای دریافت داده آنلاین از ی
 def read_csv_file(file):
     try:
         df = pd.read_csv(file, header=None)
-        # یافتن سطر عنوان ستون‌ها
-        header_row = df.iloc[0].tolist()
-        if "Date" not in header_row:
-            for i in range(2):
-                if "Date" in df.iloc[i].tolist():
-                    header_row = df.iloc[i].tolist()
-                    df = df.iloc[i+1:].reset_index(drop=True)
-                    break
-        else:
-            df = df.iloc[1:].reset_index(drop=True)
-        df.columns = header_row
-        df = df[[c for c in df.columns if c and c.lower() != "ticker"]]
-        if "Date" not in df.columns:
-            raise Exception("ستون 'Date' یافت نشد.")
-        price_col = None
-        for col in ["Price", "Close", "Open"]:
-            if col in df.columns:
-                price_col = col
+        # پیدا کردن سطر عنوان (ستونی که شامل چیزی شبیه date باشد)
+        header_idx = None
+        for i in range(min(5, len(df))):
+            row = [str(x).strip().lower() for x in df.iloc[i].tolist()]
+            if any('date' == x for x in row):
+                header_idx = i
                 break
-        if price_col is None:
+        if header_idx is None:
+            raise Exception("سطر عنوان مناسب (شامل date) یافت نشد.")
+        header_row = df.iloc[header_idx].tolist()
+        df = df.iloc[header_idx+1:].reset_index(drop=True)
+        df.columns = header_row
+
+        # پیدا کردن نام ستون تاریخ با حساسیت پایین
+        date_col = [c for c in df.columns if str(c).strip().lower() == 'date']
+        if not date_col:
+            raise Exception("ستون تاریخ با نام 'Date' یا مشابه آن یافت نشد.")
+        date_col = date_col[0]
+
+        # پیدا کردن یک ستون قیمت مناسب
+        price_candidates = [c for c in df.columns if str(c).strip().lower() in ['price', 'close', 'open']]
+        if not price_candidates:
             raise Exception("ستون قیمت ('Price' یا 'Close' یا 'Open') یافت نشد.")
-        df = df[["Date", price_col]].rename(columns={price_col: "Price"})
+        price_col = price_candidates[0]
+
+        df = df[[date_col, price_col]].rename(columns={date_col: "Date", price_col: "Price"})
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
         df = df.dropna(subset=['Date', 'Price'])
