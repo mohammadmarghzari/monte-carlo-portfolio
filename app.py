@@ -116,21 +116,17 @@ def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200):
 def show_periodic_risk_return(resampled_prices, weights, label):
     pf_prices = (resampled_prices * weights).sum(axis=1)
     pf_returns = pf_prices.pct_change().dropna()
-
     ann_factor = 12 if resampled_prices.index.freqstr and resampled_prices.index.freqstr.upper().startswith('M') else 52
     mean_ann = pf_returns.mean() * ann_factor
     risk_ann = pf_returns.std() * (ann_factor ** 0.5)
-
     pf_prices_monthly = pf_prices.resample('M').last().dropna()
     pf_returns_monthly = pf_prices_monthly.pct_change().dropna()
     mean_month = pf_returns_monthly.mean()
     risk_month = pf_returns_monthly.std()
-
     pf_prices_weekly = pf_prices.resample('W').last().dropna()
     pf_returns_weekly = pf_prices_weekly.pct_change().dropna()
     mean_week = pf_returns_weekly.mean()
     risk_week = pf_returns_weekly.std()
-
     st.markdown(f"#### 📊 {label}")
     st.markdown(f"""<div dir="rtl" style="text-align:right">
     <b>سالانه:</b> بازده: {mean_ann:.2%} | ریسک: {risk_ann:.2%}<br>
@@ -310,12 +306,19 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         show_periodic_risk_return(resampled_prices, best_weights, "پرتفو بهینه مونت‌کارلو")
         show_periodic_risk_return(resampled_prices, best_cvar_weights, f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)")
 
-        # نمودار دایره‌ای وزن پرتفو بهینه مونت کارلو
+        # نمودار دایره‌ای وزن پرتفو بهینه مونت‌کارلو
         fig_pie = go.Figure(data=[
             go.Pie(labels=asset_names, values=best_weights * 100, hole=.5, textinfo='label+percent')
         ])
         fig_pie.update_layout(title="توزیع وزنی پرتفو بهینه (مونت‌کارلو)")
         st.plotly_chart(fig_pie, use_container_width=True)
+
+        # نمودار دایره‌ای وزن پرتفو بهینه CVaR
+        fig_pie_cvar = go.Figure(data=[
+            go.Pie(labels=asset_names, values=best_cvar_weights * 100, hole=.5, textinfo='label+percent')
+        ])
+        fig_pie_cvar.update_layout(title=f"توزیع وزنی پرتفو بهینه بر اساس CVaR ({int(cvar_alpha*100)}%)")
+        st.plotly_chart(fig_pie_cvar, use_container_width=True)
 
         # نمودار مونت‌کارلو (ریسک-بازده)
         fig_mc = go.Figure()
@@ -325,7 +328,7 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
                 mode='markers',
                 marker=dict(
                     size=6,
-                    color=results[2],  # Sharpe
+                    color=results[2],
                     colorscale='Viridis',
                     showscale=True,
                     colorbar=dict(title='Sharpe Ratio')
@@ -352,7 +355,7 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
                 mode='markers',
                 marker=dict(
                     size=6,
-                    color=cvar_results[2],  # -CVaR
+                    color=cvar_results[2],
                     colorscale='Inferno',
                     showscale=True,
                     colorbar=dict(title='-CVaR (بهتر منفی‌تر)')
@@ -375,7 +378,6 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         ef_results, ef_weights = efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200)
         max_sharpe_idx = np.argmax(ef_results[2])
         mpt_weights = ef_weights[max_sharpe_idx]
-
         fig_ef = go.Figure()
         fig_ef.add_trace(go.Scatter(
             x=ef_results[0]*100, y=ef_results[1]*100,
