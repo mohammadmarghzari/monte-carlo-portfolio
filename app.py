@@ -5,20 +5,28 @@ import plotly.graph_objects as go
 import plotly.express as px
 import yfinance as yf
 import base64
+from io import StringIO
 
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو، CVaR و Married Put", layout="wide")
 st.title("📊 ابزار تحلیل پرتفو با روش مونت‌کارلو، CVaR و استراتژی Married Put")
 
+# ------------------- SESSION STATE INITIALIZATION -------------------
+if "downloaded_dfs" not in st.session_state:
+    st.session_state["downloaded_dfs"] = []
+if "uploaded_dfs" not in st.session_state:
+    st.session_state["uploaded_dfs"] = []
+if "insured_assets" not in st.session_state:
+    st.session_state["insured_assets"] = {}
+
+# ------------------- UTILITY FUNCTIONS -------------------
 def read_csv_file(file):
     try:
-        # تلاش اول: فرض بر این است که فایل header دارد
         file.seek(0)
         df_try = pd.read_csv(file)
         cols_lower = [str(c).strip().lower() for c in df_try.columns]
         if any(x in cols_lower for x in ['date']):
             df = df_try.copy()
         else:
-            # تلاش دوم: header در یکی از سطرهای اول است
             file.seek(0)
             df = pd.read_csv(file, header=None)
             header_idx = None
@@ -33,7 +41,6 @@ def read_csv_file(file):
             df = df.iloc[header_idx+1:].reset_index(drop=True)
             df.columns = header_row
 
-        # پیدا کردن نام ستون تاریخ و قیمت
         date_col = [c for c in df.columns if str(c).strip().lower() == 'date']
         if not date_col:
             raise Exception("ستون تاریخ با نام 'Date' یا مشابه آن یافت نشد.")
@@ -44,7 +51,6 @@ def read_csv_file(file):
         if not price_candidates:
             raise Exception("ستون قیمت مناسب یافت نشد.")
         price_col = price_candidates[0]
-
         df = df[[date_col, price_col]].dropna()
         if df.empty:
             raise Exception("پس از حذف داده‌های خالی، داده‌ای باقی نماند.")
@@ -113,6 +119,7 @@ def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200):
         weight_record.append(weights)
     return results, np.array(weight_record)
 
+# ------------------- SIDEBAR UI -------------------
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV آپلود کنید (هر دارایی یک فایل)", type=['csv'], accept_multiple_files=True, key="uploader"
@@ -142,7 +149,7 @@ with st.sidebar.expander("📥 دانلود داده آنلاین از یاهو 
     end = st.date_input("تاریخ پایان", value=pd.to_datetime("today"))
     download_btn = st.button("دریافت داده آنلاین")
 
-downloaded_dfs = []
+# ------------------- YAHOO FINANCE DOWNLOAD ACTION -------------------
 if download_btn and tickers_input.strip():
     tickers = [t.strip() for t in tickers_input.strip().split(",") if t.strip()]
     try:
@@ -150,66 +157,50 @@ if download_btn and tickers_input.strip():
         if data.empty:
             st.error("داده‌ای دریافت نشد!")
         else:
+            new_downloaded = []
             for t in tickers:
                 df, err = get_price_dataframe_from_yf(data, t)
                 if df is not None:
                     df['Date'] = pd.to_datetime(df['Date'])
-                    downloaded_dfs.append((t, df))
+                    new_downloaded.append((t, df))
                     st.success(f"داده {t} با موفقیت دانلود شد.")
                     st.markdown(download_link(df, f"{t}_historical.csv"), unsafe_allow_html=True)
                 else:
                     st.error(f"{err}")
+            # اضافه کردن به لیست دائمی session_state
+            st.session_state["downloaded_dfs"].extend(new_downloaded)
     except Exception as ex:
         st.error(f"خطا در دریافت داده: {ex}")
 
-if downloaded_dfs:
+# ------------------- SHOW ADDED DATA -------------------
+if st.session_state["downloaded_dfs"]:
     st.markdown('<div dir="rtl" style="text-align: right;"><b>داده‌های دانلودشده از یاهو فاینانس:</b></div>', unsafe_allow_html=True)
-    for t, df in downloaded_dfs:
+    for t, df in st.session_state["downloaded_dfs"]:
         st.markdown(f"<div dir='rtl' style='text-align: right;'><b>{t}</b></div>", unsafe_allow_html=True)
         st.dataframe(df.head())
 
-if uploaded_files or downloaded_dfs:
-    prices_df = pd.DataFrame()
-    asset_names = []
-    insured_assets = {}
-
-    for t, df in downloaded_dfs:
-        name = t
-        if 'Date' not in df.columns or 'Price' not in df.columns:
-            st.warning(f"داده آنلاین {name} باید دارای ستون‌های 'Date' و 'Price' باشد.")
-            continue
-        df = df.dropna(subset=['Date', 'Price'])
-        df = df[['Date', 'Price']].set_index('Date')
-        df.columns = [name]
-        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
-        asset_names.append(name)
-
+# ------------------- FILE UPLOAD ACTION -------------------
+if uploaded_files:
     for file in uploaded_files:
-        df = read_csv_file(file)
-        if df is None:
-            continue
-        name = file.name.split('.')[0]
-        if 'Date' not in df.columns or 'Price' not in df.columns:
-            st.warning(f"فایل {name} باید دارای ستون‌های 'Date' و 'Price' باشد.")
-            continue
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
-        df = df.dropna(subset=['Date', 'Price'])
-        df = df[['Date', 'Price']].set_index('Date')
-        df.columns = [name]
-        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
-        asset_names.append(name)
+        if not hasattr(file, "uploaded_in_session") or not file.uploaded_in_session:
+            df = read_csv_file(file)
+            if df is not None:
+                st.session_state["uploaded_dfs"].append((file.name.split('.')[0], df))
+            file.uploaded_in_session = True
 
-        st.sidebar.markdown(f"---\n### ⚙️ تنظیمات بیمه برای دارایی: `{name}`")
-        insured = st.sidebar.checkbox(f"📌 فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
+# ------------------- بیمه برای همه دارایی‌ها -------------------
+all_asset_names = [t for t, _ in st.session_state["downloaded_dfs"]] + [t for t, _ in st.session_state["uploaded_dfs"]]
+for name in all_asset_names:
+    with st.sidebar.expander(f"⚙️ بیمه برای {name}", expanded=False):
+        insured = st.checkbox(f"فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
         if insured:
-            loss_percent = st.sidebar.number_input(f"📉 درصد ضرر معامله پوت برای {name}", 0.0, 100.0, 30.0, step=0.01, key=f"loss_{name}")
-            strike = st.sidebar.number_input(f"🎯 قیمت اعمال پوت برای {name}", 0.0, 1e6, 100.0, step=0.01, key=f"strike_{name}")
-            premium = st.sidebar.number_input(f"💰 قیمت قرارداد پوت برای {name}", 0.0, 1e6, 5.0, step=0.01, key=f"premium_{name}")
-            amount = st.sidebar.number_input(f"📦 مقدار قرارداد برای {name}", 0.0, 1e6, 1.0, step=0.01, key=f"amount_{name}")
-            spot_price = st.sidebar.number_input(f"📌 قیمت فعلی دارایی پایه {name}", 0.0, 1e6, 100.0, step=0.01, key=f"spot_{name}")
-            asset_amount = st.sidebar.number_input(f"📦 مقدار دارایی پایه {name}", 0.0, 1e6, 1.0, step=0.01, key=f"base_{name}")
-            insured_assets[name] = {
+            loss_percent = st.number_input(f"📉 درصد ضرر معامله پوت برای {name}", 0.0, 100.0, 30.0, step=0.01, key=f"loss_{name}")
+            strike = st.number_input(f"🎯 قیمت اعمال پوت برای {name}", 0.0, 1e6, 100.0, step=0.01, key=f"strike_{name}")
+            premium = st.number_input(f"💰 قیمت قرارداد پوت برای {name}", 0.0, 1e6, 5.0, step=0.01, key=f"premium_{name}")
+            amount = st.number_input(f"📦 مقدار قرارداد برای {name}", 0.0, 1e6, 1.0, step=0.01, key=f"amount_{name}")
+            spot_price = st.number_input(f"📌 قیمت فعلی دارایی پایه {name}", 0.0, 1e6, 100.0, step=0.01, key=f"spot_{name}")
+            asset_amount = st.number_input(f"📦 مقدار دارایی پایه {name}", 0.0, 1e6, 1.0, step=0.01, key=f"base_{name}")
+            st.session_state["insured_assets"][name] = {
                 'loss_percent': loss_percent,
                 'strike': strike,
                 'premium': premium,
@@ -217,6 +208,31 @@ if uploaded_files or downloaded_dfs:
                 'spot': spot_price,
                 'base': asset_amount
             }
+        else:
+            st.session_state["insured_assets"].pop(name, None)
+
+# ------------------- BUILD FINAL PRICE DATAFRAME -------------------
+if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
+    prices_df = pd.DataFrame()
+    asset_names = []
+    for t, df in st.session_state["downloaded_dfs"]:
+        name = t
+        if "Date" not in df.columns or "Price" not in df.columns:
+            continue
+        df = df.dropna(subset=['Date', 'Price'])
+        df = df[['Date', 'Price']].set_index('Date')
+        df.columns = [name]
+        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
+        asset_names.append(name)
+    for t, df in st.session_state["uploaded_dfs"]:
+        name = t
+        if "Date" not in df.columns or "Price" not in df.columns:
+            continue
+        df = df.dropna(subset=['Date', 'Price'])
+        df = df[['Date', 'Price']].set_index('Date')
+        df.columns = [name]
+        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
+        asset_names.append(name)
 
     st.subheader("🧪 پیش‌نمایش داده‌ی نهایی برای تحلیل پرتفو")
     st.write(prices_df.head())
@@ -248,8 +264,8 @@ if uploaded_files or downloaded_dfs:
         adjusted_cov = cov_matrix.copy()
         preference_weights = []
         for i, name in enumerate(asset_names):
-            if name in insured_assets:
-                risk_scale = 1 - insured_assets[name]['loss_percent'] / 100
+            if name in st.session_state["insured_assets"]:
+                risk_scale = 1 - st.session_state["insured_assets"][name]['loss_percent'] / 100
                 adjusted_cov.iloc[i, :] *= risk_scale
                 adjusted_cov.iloc[:, i] *= risk_scale
                 preference_weights.append(1 / (std_devs[i] * risk_scale**0.7))
@@ -325,7 +341,6 @@ if uploaded_files or downloaded_dfs:
         for i, name in enumerate(asset_names):
             st.markdown(f"🔸 وزن {name}: {best_cvar_weights[i]*100:.2f}%")
 
-        # Efficient Frontier (مرز کارا) با روش MPT
         st.subheader("🌈 مرز کارا (Efficient Frontier) با روش MPT")
         ef_results, ef_weights = efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200)
         max_sharpe_idx = np.argmax(ef_results[2])
@@ -346,7 +361,6 @@ if uploaded_files or downloaded_dfs:
         ))
         st.plotly_chart(fig_ef, use_container_width=True)
 
-        # Max Drawdown
         st.subheader("🔻 بیشینه افت سرمایه (Max Drawdown) پرتفو")
         for label, w in [
             ("پرتفو بهینه مونت‌کارلو", best_weights),
@@ -356,6 +370,29 @@ if uploaded_files or downloaded_dfs:
             pf_prices = (resampled_prices * w).sum(axis=1)
             max_dd = calculate_max_drawdown(pf_prices)
             st.markdown(f"**{label}:** {max_dd:.2%}")
+
+        st.subheader("📉 بیمه دارایی‌ها (Married Put)")
+        for name in st.session_state["insured_assets"]:
+            info = st.session_state["insured_assets"][name]
+            x = np.linspace(info['spot'] * 0.5, info['spot'] * 1.5, 200)
+            asset_pnl = (x - info['spot']) * info['base']
+            put_pnl = np.where(x < info['strike'], (info['strike'] - x) * info['amount'], 0) - info['premium'] * info['amount']
+            total_pnl = asset_pnl + put_pnl
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(
+                x=x[total_pnl>=0], y=total_pnl[total_pnl>=0], mode='lines', name='سود', line=dict(color='green', width=3)
+            ))
+            fig2.add_trace(go.Scatter(
+                x=x[total_pnl<0], y=total_pnl[total_pnl<0], mode='lines', name='زیان', line=dict(color='red', width=3)
+            ))
+            fig2.add_trace(go.Scatter(
+                x=x, y=asset_pnl, mode='lines', name='دارایی پایه', line=dict(dash='dot', color='gray')
+            ))
+            fig2.add_trace(go.Scatter(
+                x=x, y=put_pnl, mode='lines', name='پوت', line=dict(dash='dot', color='blue')
+            ))
+            st.markdown(f"**{name}**")
+            st.plotly_chart(fig2, use_container_width=True)
 
         st.subheader("🔮 پیش‌بینی قیمت و بازده آتی هر دارایی")
         future_months = 6 if period == 'شش‌ماهه' else (3 if period == 'سه‌ماهه' else 1)
