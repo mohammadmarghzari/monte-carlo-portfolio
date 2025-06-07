@@ -3,13 +3,11 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-
 import yfinance as yf
 
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو، CVaR و Married Put", layout="wide")
 st.title("📊 ابزار تحلیل پرتفو با روش مونت‌کارلو، CVaR و استراتژی Married Put")
 
-# راهنمای یاهو فاینانس (در ابتدای صفحه)
 with st.expander("📘 راهنمای دریافت داده آنلاین از یاهو فاینانس"):
     st.markdown("""
     <div dir="rtl" style="text-align: right; font-size: 15px">
@@ -31,13 +29,56 @@ with st.expander("📘 راهنمای دریافت داده آنلاین از ی
 
 def read_csv_file(file):
     try:
-        df = pd.read_csv(file)
-        df.columns = df.columns.str.strip().str.lower().str.replace('%', '')
-        df.rename(columns={'date': 'Date', 'price': 'Price'}, inplace=True)
+        df = pd.read_csv(file, header=None)
+        # یافتن سطر عنوان ستون‌ها
+        header_row = df.iloc[0].tolist()
+        if "Date" not in header_row:
+            for i in range(2):
+                if "Date" in df.iloc[i].tolist():
+                    header_row = df.iloc[i].tolist()
+                    df = df.iloc[i+1:].reset_index(drop=True)
+                    break
+        else:
+            df = df.iloc[1:].reset_index(drop=True)
+        df.columns = header_row
+        df = df[[c for c in df.columns if c and c.lower() != "ticker"]]
+        if "Date" not in df.columns:
+            raise Exception("ستون 'Date' یافت نشد.")
+        price_col = None
+        for col in ["Price", "Close", "Open"]:
+            if col in df.columns:
+                price_col = col
+                break
+        if price_col is None:
+            raise Exception("ستون قیمت ('Price' یا 'Close' یا 'Open') یافت نشد.")
+        df = df[["Date", price_col]].rename(columns={price_col: "Price"})
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
+        df = df.dropna(subset=['Date', 'Price'])
         return df
     except Exception as e:
         st.error(f"خطا در خواندن فایل {file.name}: {e}")
         return None
+
+def calculate_max_drawdown(prices: pd.Series) -> float:
+    roll_max = prices.cummax()
+    drawdown = (prices - roll_max) / roll_max
+    max_dd = drawdown.min()
+    return max_dd
+
+def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200):
+    num_assets = len(mean_returns)
+    results = np.zeros((3, points))
+    weight_record = []
+    for i in range(points):
+        weights = np.random.dirichlet(np.ones(num_assets), size=1)[0]
+        port_return = np.dot(weights, mean_returns)
+        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        results[0,i] = port_std
+        results[1,i] = port_return
+        results[2,i] = (port_return) / port_std if port_std > 0 else 0
+        weight_record.append(weights)
+    return results, np.array(weight_record)
 
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
@@ -50,7 +91,6 @@ annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}
 user_risk = st.sidebar.slider("ریسک هدف پرتفو (انحراف معیار سالانه)", 0.01, 1.0, 0.25, 0.01)
 cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
 
-# === فیچر: دانلود داده آنلاین از یاهو فاینانس ===
 with st.sidebar.expander("📥 دانلود داده آنلاین از یاهو فاینانس"):
     st.markdown("""
     <div dir="rtl" style="text-align: right; font-size: 14px">
@@ -93,7 +133,6 @@ if download_btn and tickers_input.strip():
     except Exception as ex:
         st.error(f"خطا در دریافت داده: {ex}")
 
-# نمایش داده‌های دانلودشده (جدول)
 if downloaded_dfs:
     st.markdown('<div dir="rtl" style="text-align: right;"><b>داده‌های دانلودشده از یاهو فاینانس:</b></div>', unsafe_allow_html=True)
     for t, df in downloaded_dfs:
@@ -105,7 +144,6 @@ if uploaded_files or downloaded_dfs:
     asset_names = []
     insured_assets = {}
 
-    # ابتدا داده‌های دانلودشده از یاهو
     for t, df in downloaded_dfs:
         name = t
         if 'Date' not in df.columns or 'Price' not in df.columns:
@@ -117,24 +155,19 @@ if uploaded_files or downloaded_dfs:
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
         asset_names.append(name)
 
-    # سپس فایل‌های آپلودی کاربر
     for file in uploaded_files:
         df = read_csv_file(file)
         if df is None:
             continue
-
         name = file.name.split('.')[0]
         if 'Date' not in df.columns or 'Price' not in df.columns:
             st.warning(f"فایل {name} باید دارای ستون‌های 'Date' و 'Price' باشد.")
             continue
-
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df['Price'] = df['Price'].astype(str).str.replace(',', '')
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
         df = df.dropna(subset=['Date', 'Price'])
         df = df[['Date', 'Price']].set_index('Date')
         df.columns = [name]
-
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
         asset_names.append(name)
 
@@ -171,13 +204,12 @@ if uploaded_files or downloaded_dfs:
 
     adjusted_cov = cov_matrix.copy()
     preference_weights = []
-
     for i, name in enumerate(asset_names):
         if name in insured_assets:
             risk_scale = 1 - insured_assets[name]['loss_percent'] / 100
             adjusted_cov.iloc[i, :] *= risk_scale
             adjusted_cov.iloc[:, i] *= risk_scale
-            preference_weights.append(1 / (std_devs[i] * risk_scale**0.7))  # وزن بیشتر در بیمه
+            preference_weights.append(1 / (std_devs[i] * risk_scale**0.7))
         else:
             preference_weights.append(1 / std_devs[i])
     preference_weights = np.array(preference_weights)
@@ -227,7 +259,6 @@ if uploaded_files or downloaded_dfs:
     best_cvar_weights = results[5:, best_cvar_idx]
 
     st.subheader("📊 داشبورد خلاصه پرتفو")
-    total_weight = np.sum(best_weights)
     st.markdown(f'''
     <div dir="rtl" style="text-align: right">
     <b>بازده سالانه پرتفو:</b> {best_return:.2%}<br>
@@ -250,12 +281,6 @@ if uploaded_files or downloaded_dfs:
     """)
     for i, name in enumerate(asset_names):
         st.markdown(f"🔹 وزن {name}: {best_weights[i]*100:.2f}%")
-    st.markdown('''
-    <div dir="rtl" style="text-align: right">
-    <b>پرتفو بهینه (مونت‌کارلو):</b><br>
-    شبیه‌سازی Monte Carlo یکی از روش‌های قدرتمند برای بهینه‌سازی پرتفو بر اساس بازده و ریسک است. در این روش، با تولید تصادفی هزاران ترکیب از وزن دارایی‌ها و محاسبه بازده و ریسک هر ترکیب، ترکیبی پیدا می‌شود که نزدیک‌ترین ریسک را به ریسک هدف کاربر دارد. این رویکرد به شما کمک می‌کند تا ترکیب دارایی‌هایی با بیشترین احتمال بازده و کمترین ریسک را شناسایی کنید. مزیت اصلی این روش انعطاف‌پذیری بالا و بررسی حالات مختلف بازار است.
-    </div>
-    ''', unsafe_allow_html=True)
 
     st.subheader(f"🟢 پرتفو بهینه بر اساس CVaR ({int(cvar_alpha*100)}%)")
     st.markdown(f"""
@@ -265,12 +290,6 @@ if uploaded_files or downloaded_dfs:
     """)
     for i, name in enumerate(asset_names):
         st.markdown(f"🔸 وزن {name}: {best_cvar_weights[i]*100:.2f}%")
-    st.markdown(f'''
-    <div dir="rtl" style="text-align: right">
-    <b>پرتفو بهینه بر اساس CVaR ({int(cvar_alpha*100)}%):</b><br>
-    معیار <b>CVaR</b> (ارزش در معرض ریسک شرطی) ریسک پرتفو را در شرایط بحرانی‌تر بازار اندازه‌گیری می‌کند. این معیار بهترین ابزار برای ارزیابی زیان‌های شدید و کم‌احتمال است. پرتفو بهینه بر اساس CVaR ترکیبی از دارایی‌ها را ارائه می‌دهد که در بدترین سناریوهای بازار، کمترین زیان ممکن را متحمل می‌شود. این سبک برای سرمایه‌گذارانی مناسب است که مدیریت ریسک حداکثری برایشان اهمیت دارد.
-    </div>
-    ''', unsafe_allow_html=True)
 
     st.subheader("📋 جدول مقایسه وزن دارایی‌ها (مونت‌کارلو و CVaR)")
     compare_df = pd.DataFrame({
@@ -280,52 +299,63 @@ if uploaded_files or downloaded_dfs:
     })
     compare_df['اختلاف وزن (%)'] = compare_df[f'وزن CVaR ({int(cvar_alpha*100)}%) (%)'] - compare_df['وزن مونت‌کارلو (%)']
     st.dataframe(compare_df.set_index('دارایی'), use_container_width=True, height=300)
-    st.markdown('''
-    <div dir="rtl" style="text-align: right">
-    این جدول تفاوت وزن دارایی‌ها را در دو مدل بهینه‌سازی (مونت‌کارلو و CVaR) نشان می‌دهد. اختلاف وزن‌ها می‌تواند بیانگر میزان اهمیت مدیریت ریسک در هر دارایی باشد.
-    </div>
-    ''', unsafe_allow_html=True)
 
     fig_w = go.Figure()
     fig_w.add_trace(go.Bar(x=asset_names, y=best_weights*100, name='مونت‌کارلو'))
     fig_w.add_trace(go.Bar(x=asset_names, y=best_cvar_weights*100, name=f'CVaR {int(cvar_alpha*100)}%'))
     fig_w.update_layout(barmode='group', title="مقایسه وزن دارایی‌ها در دو سبک")
     st.plotly_chart(fig_w, use_container_width=True)
+
+    # --- Efficient Frontier (مرز کارا) با روش MPT ---
+    st.subheader("🌈 مرز کارا (Efficient Frontier) با روش MPT")
+    ef_results, ef_weights = efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200)
+    max_sharpe_idx = np.argmax(ef_results[2])
+    mpt_return = ef_results[1, max_sharpe_idx]
+    mpt_risk = ef_results[0, max_sharpe_idx]
+    mpt_weights = ef_weights[max_sharpe_idx]
+
+    fig_ef = go.Figure()
+    fig_ef.add_trace(go.Scatter(
+        x=ef_results[0]*100, y=ef_results[1]*100,
+        mode='markers', marker=dict(color=ef_results[2], colorscale='Viridis', size=7, showscale=True),
+        name='مرز کارا'
+    ))
+    fig_ef.add_trace(go.Scatter(
+        x=[mpt_risk*100], y=[mpt_return*100],
+        mode='markers+text', marker=dict(size=14, color='red', symbol='star'),
+        text=["پرتفوی بهینه MPT"], textposition="top right",
+        name='پرتفوی MPT'
+    ))
+    st.plotly_chart(fig_ef, use_container_width=True)
     st.markdown('''
     <div dir="rtl" style="text-align: right">
-    این نمودار بصری به مقایسه وزن‌های بهینه هر دارایی در هر یک از دو روش می‌پردازد و به شما کمک می‌کند تاثیر مدل انتخابی بر سبد دارایی خود را بهتر درک کنید.
+    <b>مرز کارا (MPT):</b> این نمودار مرز کارا را براساس تئوری مدرن پرتفولیو (MPT) نشان می‌دهد. نقطه قرمز پرتفو با بالاترین نسبت شارپ است.
     </div>
     ''', unsafe_allow_html=True)
 
-    st.subheader("🌈 نمودار مرز کارا")
-    fig = px.scatter(
-        x=results[1]*100,
-        y=results[0]*100,
-        color=results[2],
-        labels={'x': 'ریسک (%)', 'y': 'بازده (%)'},
-        title='پرتفوهای شبیه‌سازی‌شده (مونت‌کارلو) و مرز CVaR',
-        color_continuous_scale='Viridis'
-    )
-    fig.add_trace(go.Scatter(x=[best_risk*100], y=[best_return*100],
-                             mode='markers', marker=dict(size=12, color='red', symbol='star'),
-                             name='پرتفوی بهینه مونت‌کارلو'))
-    fig.add_trace(go.Scatter(x=[best_cvar_risk*100], y=[best_cvar_return*100],
-                             mode='markers', marker=dict(size=12, color='orange', symbol='star'),
-                             name='پرتفوی بهینه CVaR'))
-    cvar_sorted_idx = np.argsort(results[4])
-    fig.add_trace(go.Scatter(
-        x=results[1, cvar_sorted_idx]*100,
-        y=results[0, cvar_sorted_idx]*100,
-        mode='lines',
-        line=dict(color='orange', dash='dot'),
-        name='مرز کارا (CVaR)'
-    ))
-    st.plotly_chart(fig, use_container_width=True)
-    st.markdown('''
+    st.subheader("📌 خلاصه پرتفو بهینه MPT")
+    st.markdown(f'''
     <div dir="rtl" style="text-align: right">
-    <b>مرز کارا</b> (Efficient Frontier) مجموعه‌ای از پرتفوهاست که بهترین بازده ممکن را برای سطح مشخصی از ریسک ارائه می‌دهد. این نمودار به شما کمک می‌کند پرتفوهای مختلف را از نظر ریسک و بازده و همچنین تاثیر مدیریت ریسک با CVaR مقایسه کنید.
+    <b>بازده سالانه پرتفو (MPT):</b> {mpt_return:.2%}<br>
+    <b>ریسک سالانه پرتفو (MPT):</b> {mpt_risk:.2%}<br>
+    <b>نسبت شارپ (MPT):</b> {ef_results[2, max_sharpe_idx]:.2f}<br>
+    <b>بیشترین وزن:</b> {asset_names[np.argmax(mpt_weights)]} ({np.max(mpt_weights)*100:.2f}%)<br>
+    <b>کمترین وزن:</b> {asset_names[np.argmin(mpt_weights)]} ({np.min(mpt_weights)*100:.2f}%)<br>
     </div>
     ''', unsafe_allow_html=True)
+    for i, name in enumerate(asset_names):
+        st.markdown(f"🔹 وزن {name}: {mpt_weights[i]*100:.2f}%")
+
+    # === محاسبه Max Drawdown پرتفو (بهینه مونت‌کارلو، CVaR، MPT) ===
+    st.subheader("🔻 بیشینه افت سرمایه (Max Drawdown) پرتفو")
+    for label, w in [
+        ("پرتفو بهینه مونت‌کارلو", best_weights),
+        (f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)", best_cvar_weights),
+        ("پرتفو بهینه MPT", mpt_weights),
+    ]:
+        pf_prices = (resampled_prices * w).sum(axis=1)
+        max_dd = calculate_max_drawdown(pf_prices)
+        st.markdown(f"**{label}:** {max_dd:.2%}")
 
     st.subheader("🔵 نمودار بازده- CVaR برای پرتفوها")
     fig_cvar = px.scatter(
@@ -338,11 +368,6 @@ if uploaded_files or downloaded_dfs:
                                   mode='markers', marker=dict(size=12, color='red', symbol='star'),
                                   name='پرتفوی بهینه CVaR'))
     st.plotly_chart(fig_cvar, use_container_width=True)
-    st.markdown('''
-    <div dir="rtl" style="text-align: right">
-    این نمودار رابطه بین بازده و معیار ریسک <b>CVaR</b> را در سبدهای مختلف نمایش می‌دهد. هرچه مقدار CVaR کمتر باشد، پرتفو در سناریوهای بحرانی کمتر آسیب‌پذیر است.
-    </div>
-    ''', unsafe_allow_html=True)
 
     st.subheader("💡 دارایی‌های پیشنهادی بر اساس نسبت بازده به ریسک")
     asset_scores = {}
@@ -356,12 +381,6 @@ if uploaded_files or downloaded_dfs:
     for name, score in sorted_assets:
         insured_str = " (بیمه شده)" if name in insured_assets else ""
         st.markdown(f"🔸 **{name}{insured_str}** | نسبت بازده به ریسک: {score:.2f}")
-
-    st.markdown('''
-    <div dir="rtl" style="text-align: right">
-    این بخش دارایی‌هایی را که بالاترین نسبت بازده به ریسک را دارند معرفی می‌کند. دارایی بیمه‌شده دارای ریسک تعدیل‌شده است که با علامت مشخص شده‌اند.
-    </div>
-    ''', unsafe_allow_html=True)
 
     for name, info in insured_assets.items():
         st.subheader(f"📉 نمودار سود و زیان استراتژی Married Put - {name}")
@@ -396,13 +415,6 @@ if uploaded_files or downloaded_dfs:
         fig2.update_layout(title='نمودار سود و زیان', xaxis_title='قیمت دارایی در سررسید', yaxis_title='سود/زیان')
         st.plotly_chart(fig2, use_container_width=True)
 
-        st.markdown('''
-        <div dir="rtl" style="text-align: right">
-        <b>استراتژی Married Put:</b><br>
-        در این استراتژی، سرمایه‌گذار همزمان با خرید دارایی پایه، یک قرارداد اختیار فروش (Put) نیز خریداری می‌کند. این کار باعث می‌شود در صورت کاهش شدید قیمت دارایی، زیان‌های احتمالی پوشش داده شود، اما در صورت رشد قیمت، همچنان از افزایش قیمت بهره‌مند شوید. بنابراین، Married Put ابزاری برای بیمه کردن سبد دارایی در برابر سقوط‌های غیرمنتظره است.
-        </div>
-        ''', unsafe_allow_html=True)
-
         if st.button(f"📷 ذخیره نمودار Married Put برای {name}"):
             try:
                 img_bytes = fig2.to_image(format="png")
@@ -433,12 +445,5 @@ if uploaded_files or downloaded_dfs:
         st.plotly_chart(fig3, use_container_width=True)
         st.markdown(f"📈 **میانگین قیمت آینده:** {future_price_mean:.2f} | 📊 **درصد بازده آتی:** {future_return:.2%}")
 
-    st.markdown('''
-    <div dir="rtl" style="text-align: right">
-    <b>پیش‌بینی قیمت آینده با شبیه‌سازی تصادفی:</b><br>
-    در این مدل، با استفاده از مدل‌سازی تصادفی (Random Walk) و پارامترهای بازده و ریسک تاریخی، قیمت‌های آتی هر دارایی در بازه زمانی مشخص شبیه‌سازی می‌شود. این پیش‌بینی به شما دید بهتری نسبت به سناریوهای احتمالی قیمت در آینده می‌دهد، اما باید توجه داشت که پیش‌بینی‌ها هیچ‌گاه قطعی نیستند و فقط جنبه تحلیلی و آماری دارند.
-    </div>
-    ''', unsafe_allow_html=True)
-
 else:
-    st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
+    st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price یا Close یا Open را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
