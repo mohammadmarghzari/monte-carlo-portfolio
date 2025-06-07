@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 import yfinance as yf
 import base64
 
@@ -118,18 +117,15 @@ def show_periodic_risk_return(resampled_prices, weights, label):
     pf_prices = (resampled_prices * weights).sum(axis=1)
     pf_returns = pf_prices.pct_change().dropna()
 
-    # سالانه
     ann_factor = 12 if resampled_prices.index.freqstr and resampled_prices.index.freqstr.upper().startswith('M') else 52
     mean_ann = pf_returns.mean() * ann_factor
     risk_ann = pf_returns.std() * (ann_factor ** 0.5)
 
-    # ماهانه
     pf_prices_monthly = pf_prices.resample('M').last().dropna()
     pf_returns_monthly = pf_prices_monthly.pct_change().dropna()
     mean_month = pf_returns_monthly.mean()
     risk_month = pf_returns_monthly.std()
 
-    # هفتگی
     pf_prices_weekly = pf_prices.resample('W').last().dropna()
     pf_returns_weekly = pf_prices_weekly.pct_change().dropna()
     mean_week = pf_returns_weekly.mean()
@@ -143,7 +139,6 @@ def show_periodic_risk_return(resampled_prices, weights, label):
     </div>
     """, unsafe_allow_html=True)
 
-# ----------- SIDEBAR ----------- #
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV آپلود کنید (هر دارایی یک فایل)", type=['csv'], accept_multiple_files=True, key="uploader"
@@ -189,12 +184,6 @@ if download_btn and tickers_input.strip():
             st.session_state["downloaded_dfs"].extend(new_downloaded)
     except Exception as ex:
         st.error(f"خطا در دریافت داده: {ex}")
-
-if st.session_state["downloaded_dfs"]:
-    st.markdown('<div dir="rtl" style="text-align: right;"><b>داده‌های دانلودشده از یاهو فاینانس:</b></div>', unsafe_allow_html=True)
-    for t, df in st.session_state["downloaded_dfs"]:
-        st.markdown(f"<div dir='rtl' style='text-align: right;'><b>{t}</b></div>", unsafe_allow_html=True)
-        st.dataframe(df.head())
 
 if uploaded_files:
     for file in uploaded_files:
@@ -248,9 +237,8 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
         asset_names.append(name)
 
-    st.subheader("🧪 پیش‌نمایش داده‌ی نهایی برای تحلیل پرتفو")
-    st.write(prices_df.head())
-    st.write("شکل داده:", prices_df.shape)
+    st.subheader("📉 روند قیمت دارایی‌ها")
+    st.line_chart(prices_df.resample(resample_rule).last().dropna())
 
     if prices_df.empty:
         st.error("❌ داده‌ی معتبری برای تحلیل یافت نشد.")
@@ -263,12 +251,11 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         cov_matrix = returns.cov() * annual_factor
         std_devs = np.sqrt(np.diag(cov_matrix))
 
-        st.subheader("📉 روند قیمت دارایی‌ها")
-        st.line_chart(resampled_prices)
-
+        # مونت‌کارلو و CVaR
         n_portfolios = 3000
         n_mc = 1000
         results = np.zeros((5 + len(asset_names), n_portfolios))
+        cvar_results = np.zeros((3 + len(asset_names), n_portfolios))
         np.random.seed(42)
         rf = 0
         downside = returns.copy()
@@ -308,33 +295,86 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             results[4, i] = -CVaR
             results[5:, i] = weights
 
-        best_idx = np.argmin(np.abs(results[1] - user_risk))
-        best_return = results[0, best_idx]
-        best_risk = results[1, best_idx]
-        best_sharpe = results[2, best_idx]
-        best_sortino = results[3, best_idx]
-        best_weights = results[5:, best_idx]
+            # برای نمودار CVaR
+            cvar_results[0, i] = port_std
+            cvar_results[1, i] = port_return
+            cvar_results[2, i] = -CVaR
+            cvar_results[3:, i] = weights
 
+        best_idx = np.argmin(np.abs(results[1] - user_risk))
+        best_weights = results[5:, best_idx]
         best_cvar_idx = np.argmin(results[4])
-        best_cvar_return = results[0, best_cvar_idx]
-        best_cvar_risk = results[1, best_cvar_idx]
-        best_cvar_cvar = results[4, best_cvar_idx]
         best_cvar_weights = results[5:, best_cvar_idx]
 
         st.subheader("📊 داشبورد خلاصه پرتفو")
         show_periodic_risk_return(resampled_prices, best_weights, "پرتفو بهینه مونت‌کارلو")
         show_periodic_risk_return(resampled_prices, best_cvar_weights, f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)")
 
+        # نمودار دایره‌ای وزن پرتفو بهینه مونت کارلو
         fig_pie = go.Figure(data=[
             go.Pie(labels=asset_names, values=best_weights * 100, hole=.5, textinfo='label+percent')
         ])
         fig_pie.update_layout(title="توزیع وزنی پرتفو بهینه (مونت‌کارلو)")
         st.plotly_chart(fig_pie, use_container_width=True)
 
+        # نمودار مونت‌کارلو (ریسک-بازده)
+        fig_mc = go.Figure()
+        fig_mc.add_trace(
+            go.Scatter(
+                x=results[1]*100, y=results[0]*100,
+                mode='markers',
+                marker=dict(
+                    size=6,
+                    color=results[2],  # Sharpe
+                    colorscale='Viridis',
+                    showscale=True,
+                    colorbar=dict(title='Sharpe Ratio')
+                ),
+                name='پرتفوها'
+            )
+        )
+        fig_mc.add_trace(go.Scatter(
+            x=[results[1,best_idx]*100], y=[results[0,best_idx]*100],
+            mode='markers+text',
+            marker=dict(size=15, color='red'),
+            text=["بهینه"],
+            textposition="top right",
+            name='پرتفوی بهینه'
+        ))
+        fig_mc.update_layout(title="نمودار ریسک-بازده پرتفوهای مونت‌کارلو", xaxis_title="ریسک (%)", yaxis_title="بازده (%)")
+        st.plotly_chart(fig_mc, use_container_width=True)
+
+        # نمودار CVaR (ریسک-بازده با رنگ CVaR)
+        fig_cvar = go.Figure()
+        fig_cvar.add_trace(
+            go.Scatter(
+                x=cvar_results[0]*100, y=cvar_results[1]*100,
+                mode='markers',
+                marker=dict(
+                    size=6,
+                    color=cvar_results[2],  # -CVaR
+                    colorscale='Inferno',
+                    showscale=True,
+                    colorbar=dict(title='-CVaR (بهتر منفی‌تر)')
+                ),
+                name='CVaR Portfolios'
+            )
+        )
+        fig_cvar.add_trace(go.Scatter(
+            x=[cvar_results[0,best_cvar_idx]*100], y=[cvar_results[1,best_cvar_idx]*100],
+            mode='markers+text',
+            marker=dict(size=15, color='lime'),
+            text=["بهینه CVaR"],
+            textposition="top right",
+            name='پرتفوی بهینه CVaR'
+        ))
+        fig_cvar.update_layout(title=f"نمودار ریسک-بازده پرتفوها با رنگ CVaR ({int(cvar_alpha*100)}%)", xaxis_title="ریسک (%)", yaxis_title="بازده (%)")
+        st.plotly_chart(fig_cvar, use_container_width=True)
+
+        # مرز کارا
         ef_results, ef_weights = efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200)
         max_sharpe_idx = np.argmax(ef_results[2])
         mpt_weights = ef_weights[max_sharpe_idx]
-        show_periodic_risk_return(resampled_prices, mpt_weights, "پرتفو بهینه MPT")
 
         fig_ef = go.Figure()
         fig_ef.add_trace(go.Scatter(
