@@ -6,8 +6,8 @@ import plotly.express as px
 from datetime import datetime
 import yfinance as yf
 
-st.set_page_config(page_title="تحلیل پرتفو پیشرفته", layout="wide")
-st.title("📊 ابزار پیشرفته تحلیل پرتفو و مدیریت ریسک")
+st.set_page_config(page_title="Portfolio360 v8 - تحلیل پرتفو و مدیریت ریسک", layout="wide")
+st.title("📊 Portfolio360 v8 - ابزار حرفه‌ای تحلیل پرتفو و مدیریت ریسک")
 
 # ----- تنظیمات سایدبار -----
 st.sidebar.header("🔧 تنظیمات تحلیل")
@@ -33,7 +33,11 @@ n_portfolios = st.sidebar.slider("تعداد پرتفوهای شبیه‌ساز�
 
 # بارگذاری داده‌ها (CSV یا یاهو فاینانس)
 st.sidebar.markdown("---")
-uploaded_files = st.sidebar.file_uploader("آپلود فایل CSV (ستون Date و Price)", type=['csv'], accept_multiple_files=True)
+uploaded_files = st.sidebar.file_uploader(
+    "آپلود فایل CSV قیمت دارایی‌ها (ستون تاریخ و قیمت - Adj Close یا Close)", 
+    type=['csv'], 
+    accept_multiple_files=True
+)
 with st.sidebar.expander("دریافت داده از یاهو فاینانس"):
     tickers = st.text_input("نمادها (مثال: BTC-USD,AAPL,ETH-USD)", "")
     if st.button("دانلود داده"):
@@ -46,31 +50,37 @@ with st.sidebar.expander("دریافت داده از یاهو فاینانس"):
                 t = t.strip()
                 if t == "":
                     continue
-                if (t,) in data_yf.columns:  # For single asset, data is not multi-indexed
-                    df = data_yf.reset_index()[['Date', 'Adj Close']].rename(columns={'Adj Close': 'Price'})
-                else:
+                try:
                     df = data_yf[t].reset_index()[['Date', 'Adj Close']].rename(columns={'Adj Close': 'Price'})
+                except Exception:
+                    df = data_yf.reset_index()[['Date', 'Adj Close']].rename(columns={'Adj Close': 'Price'})
                 df.to_csv(f"{t}.csv", index=False)
                 st.success(f"داده {t} با موفقیت آماده شد. می‌توانید آن را به ابزار آپلود کنید.")
 
-# پردازش داده‌ها
+# پردازش فایل‌های آپلودشده با اولویت Adj Close و فقط نام فایل
 prices_df = pd.DataFrame()
 asset_names = []
 weight_settings = {}
 
 if uploaded_files:
     for file in uploaded_files:
-        df = pd.read_csv(file)
-        df.columns = df.columns.str.strip().str.lower()
-        if 'date' not in df.columns or 'price' not in df.columns:
-            st.error(f"فایل {file.name} باید 'Date' و 'Price' داشته باشد.")
-            continue
-        df['Date'] = pd.to_datetime(df['date'])
-        df = df[(df['Date'] >= pd.to_datetime(date_start)) & (df['Date'] <= pd.to_datetime(date_end))]
         name = file.name.split('.')[0]
-        df = df[['Date', 'price']].rename(columns={'price': name}).set_index('Date')
-        asset_names.append(name)
+        df = pd.read_csv(file)
+        # جستجوی ستون قیمت تعدیل‌شده با اولویت Adj Close سپس Close (حساس به حروف)
+        price_col = None
+        for col in ["Adj Close", "adj close", "AdjClose", "adjclose", "Close", "close"]:
+            if col in df.columns:
+                price_col = col
+                break
+        if price_col is None:
+            st.error(f"فایل {file.name} ستون 'Adj Close' یا 'Close' ندارد!")
+            continue
+        df = df[["Date", price_col]].rename(columns={price_col: name})
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.set_index("Date")
+        df = df[(df.index >= pd.to_datetime(date_start)) & (df.index <= pd.to_datetime(date_end))]
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
+        asset_names.append(name)
     prices_df.dropna(inplace=True)
 
     # محدودیت و وزن اولیه برای هر دارایی
@@ -84,12 +94,18 @@ if uploaded_files:
 
 # تحلیل پرتفو
 if not prices_df.empty:
-    st.markdown("### 📈 داده‌های قیمت دارایی‌ها")
+    st.markdown("### 📈 داده‌های قیمت پایانی تعدیل‌شده دارایی‌ها")
     st.dataframe(prices_df.tail())
 
     returns = prices_df.pct_change().dropna()
     mean_ret = returns.mean() * 252
     cov = returns.cov() * 252
+
+    # توابع بازده و ریسک پرتفو
+    def portfolio_return(weights):
+        return np.dot(weights, mean_ret)
+    def portfolio_risk(weights):
+        return np.sqrt(np.dot(weights.T, np.dot(cov, weights)))
 
     results = []
     for _ in range(n_portfolios):
@@ -101,8 +117,8 @@ if not prices_df.empty:
                     legal = False
             if legal:
                 break
-        port_ret = np.dot(w, mean_ret)
-        port_risk = np.sqrt(np.dot(w.T, np.dot(cov, w)))
+        port_ret = portfolio_return(w)
+        port_risk = portfolio_risk(w)
         port_sorted = np.dot(returns.values, w)
         downside = port_sorted[port_sorted < target_return]
         sortino = (port_ret - target_return) / (np.std(downside) + 1e-8) if len(downside) > 0 else 0
@@ -113,14 +129,15 @@ if not prices_df.empty:
         peak = np.maximum.accumulate(cum)
         drawdowns = (cum - peak) / peak
         max_dd = drawdowns.min()
+        sharpe = port_ret / (port_risk + 1e-8)
         results.append({
             "weights": w, "return": port_ret, "risk": port_risk, "sortino": sortino,
-            "omega": omega, "cvar": cvar, "var": var, "drawdown": max_dd
+            "omega": omega, "cvar": cvar, "var": var, "drawdown": max_dd, "sharpe": sharpe
         })
 
     # انتخاب پرتفو بهینه بر اساس روش انتخابی
     if method == "Sharpe (مرز کارا)":
-        best = max(results, key=lambda x: x["return"]/x["risk"])
+        best = max(results, key=lambda x: x["sharpe"])
         explain = "پرتفو با بیشترین نسبت شارپ (مرز کارا)."
     elif method == "Sortino":
         best = max(results, key=lambda x: x["sortino"])
@@ -143,39 +160,49 @@ if not prices_df.empty:
 
     # نمایش نتایج
     st.markdown(f"### 📊 خلاصه پرتفو بهینه ({method})")
-    st.markdown(f"- **بازده سالانه:** {best['return']:.2%}")
-    st.markdown(f"- **ریسک سالانه:** {best['risk']:.2%}")
+    st.markdown(f"- **بازده سالانه:** {best['return']*100:.2f}%")
+    st.markdown(f"- **ریسک سالانه:** {best['risk']*100:.2f}%")
+    st.markdown(f"- **نسبت شارپ:** {best['sharpe']:.2f}")
     st.markdown(f"- **سورتینو:** {best['sortino']:.2f}")
     st.markdown(f"- **امگا:** {best['omega']:.2f}")
-    st.markdown(f"- **CVaR ({int(cvar_alpha*100)}%):** {best['cvar']:.2%}")
-    st.markdown(f"- **VaR ({int(cvar_alpha*100)}%):** {best['var']:.2%}")
-    st.markdown(f"- **Max Drawdown:** {best['drawdown']:.2%}")
+    st.markdown(f"- **CVaR ({int(cvar_alpha*100)}%):** {best['cvar']*100:.2f}%")
+    st.markdown(f"- **VaR ({int(cvar_alpha*100)}%):** {best['var']*100:.2f}%")
+    st.markdown(f"- **Max Drawdown:** {best['drawdown']*100:.2f}%")
     st.markdown(f"**{explain}**")
 
     st.markdown("#### 📋 جدول وزن پرتفو")
     dfw = pd.DataFrame({'دارایی': asset_names, 'وزن (%)': np.round(best['weights']*100, 2)})
     st.dataframe(dfw.set_index('دارایی'), use_container_width=True)
 
-    # نمودارها
+    # نمودار وزنی پرتفو
     st.markdown("#### 📈 نمودار وزنی پرتفو")
     fig = go.Figure(data=[go.Pie(labels=asset_names, values=best['weights'], hole=0.5)])
     st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("#### 🌈 مرز کارا و Max Drawdown")
+    # مرز کارا: محور x ریسک، محور y بازده، طیف رنگی نسبت شارپ و علامت پرتفو بهینه
+    st.markdown("#### 🌈 مرز کارا و طیف رنگی نسبت شارپ")
     df_res = pd.DataFrame(results)
-    fig2 = px.scatter(df_res, x="risk", y="return", color="drawdown", labels={'drawdown': 'Max Drawdown'})
-    fig2.add_trace(go.Scatter(x=[best["risk"]], y=[best["return"]], mode="markers+text", marker=dict(size=14, color="red"), text=["پرتفو بهینه"], textposition="top center"))
+    fig2 = px.scatter(
+        df_res, x=df_res["risk"]*100, y=df_res["return"]*100, color="sharpe",
+        labels={'risk': 'ریسک (%)', 'return': 'بازده (%)', 'sharpe': 'نسبت شارپ'},
+        title="مرز کارا پرتفوها (محور افقی: ریسک، محور عمودی: بازده، رنگ: نسبت شارپ)",
+        color_continuous_scale="Viridis"
+    )
+    fig2.add_trace(go.Scatter(
+        x=[best["risk"]*100], y=[best["return"]*100], mode="markers+text",
+        marker=dict(size=14, color="red"), text=["پرتفو بهینه"], textposition="top center"
+    ))
     st.plotly_chart(fig2, use_container_width=True)
 
     st.markdown("""
     <div dir="rtl" style="text-align:right;">
-    <b>توضیحات:</b><br>
-    - همه پارامترهای مهم هر روش از جمله بازده مقبول (target_return)، سطح اطمینان CVaR/VaR، تعداد پرتفو و محدودیت وزن هر دارایی قابل تنظیم است.<br>
-    - بازه زمانی تحلیل با انتخاب تاریخ شروع و پایان تعیین می‌شود.<br>
-    - وزن اولیه و محدودیت برای هر دارایی جداگانه در سایدبار وجود دارد.<br>
-    - روش‌های Max Drawdown و VaR و سایر روش‌ها به عنوان روش بهینه‌سازی و همچنین مقدار خروجی نمایش داده می‌شوند.<br>
+    <b>یادآوری:</b><br>
+    - فایل هر دارایی را فقط با نام فایل (بدون نیاز به مسیر کامل) آپلود کنید.<br>
+    - قیمت پایانی تعدیل‌شده (Adj Close) به صورت هوشمند استخراج و استفاده می‌شود.<br>
+    - تمامی نتایج به درصد نمایش داده می‌شود.<br>
+    - مرز کارا، نمودار وزنی و شاخص‌های مهم پرتفو کاملا حرفه‌ای و کاربردی ارائه شده است.<br>
     </div>
     """, unsafe_allow_html=True)
 
 else:
-    st.info("لطفاً داده بارگذاری کنید یا از یاهو فاینانس دانلود نمایید.")
+    st.info("لطفاً ابتدا داده قیمت دارایی‌ها را آپلود کنید یا از یاهو فاینانس دانلود نمایید.")
