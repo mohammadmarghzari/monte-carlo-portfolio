@@ -4,65 +4,55 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
-import yfinance as yf
+from statsmodels.tsa.arima.model import ARIMA
+import warnings
+warnings.filterwarnings("ignore")
 
-st.set_page_config(page_title="Portfolio360 v10 - تحلیل پرتفو و مدیریت ریسک", layout="wide")
-st.title("📊 Portfolio360 v10 - ابزار حرفه‌ای تحلیل پرتفو و مدیریت ریسک")
+st.set_page_config(page_title="Portfolio360 v11 - تحلیل پیشرفته پرتفو و پیش‌بینی", layout="wide")
+st.title("📊 Portfolio360 v11 - ابزار پیشرفته تحلیل پرتفو و پیش‌بینی قیمت")
 
-# ----- تنظیمات سایدبار -----
+# ----------- سایدبار تنظیمات -------------
 st.sidebar.header("🔧 تنظیمات تحلیل")
 
-# انتخاب بازه زمانی دلخواه
+# تاریخ شروع و پایان
 date_start = st.sidebar.date_input("تاریخ شروع تحلیل", value=datetime(2022, 1, 1))
 date_end = st.sidebar.date_input("تاریخ پایان تحلیل", value=datetime.today())
 if date_end < date_start:
     st.sidebar.error("تاریخ پایان باید بعد از تاریخ شروع باشد.")
 
-# انتخاب روش بهینه‌سازی
-st.sidebar.markdown("---")
-all_methods = [
-    "Sharpe (مرز کارا)", "Sortino", "Omega", "CVaR", "VaR", "Max Drawdown"
-]
-method = st.sidebar.selectbox("روش بهینه‌سازی:", all_methods)
-
-# پارامترهای تخصصی هر روش
-st.sidebar.markdown("### ⚙️ پارامترهای روش انتخابی")
-target_return = st.sidebar.number_input("حداقل بازده مقبول (%)", value=5.0, min_value=0.0, max_value=100.0, step=0.1) / 100
-cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR/VaR", 0.80, 0.99, 0.95, 0.01)
+# تعداد پرتفوهای شبیه‌سازی
 n_portfolios = st.sidebar.slider("تعداد پرتفوهای شبیه‌سازی", 1000, 20000, 5000, 1000)
 
-# بارگذاری داده‌ها (CSV یا یاهو فاینانس)
+# پارامترهای ریسک پرتفو
+st.sidebar.markdown("---")
+st.sidebar.subheader("محدوده ریسک پرتفو")
+min_risk = st.sidebar.selectbox("حداقل ریسک پرتفو (%)", [i for i in range(10, 100, 10)], index=0)
+max_risk = st.sidebar.selectbox("حداکثر ریسک پرتفو (%)", [i for i in range(10, 110, 10)], index=9)
+st.sidebar.markdown(
+    "<small>این فیلدها محدوده ریسک پرتفوها را روی مرز کارا تعیین می‌کنند و فقط سبدهایی با ریسک در این بازه نمایش داده می‌شوند.</small>",
+    unsafe_allow_html=True
+)
+
+# پارامترهای ویژه هر سبک
+st.sidebar.markdown("---")
+st.sidebar.subheader("پارامترهای روش‌ها")
+target_return = st.sidebar.number_input("بازده هدف برای سورتینو و امگا (%)", value=5.0, min_value=0.0, max_value=100.0, step=0.1) / 100
+cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR/VaR", 0.80, 0.99, 0.95, 0.01)
+
+# بارگذاری داده‌ها
 st.sidebar.markdown("---")
 uploaded_files = st.sidebar.file_uploader(
     "آپلود فایل CSV قیمت دارایی‌ها (ستون تاریخ و قیمت - هر نام متداول برای قیمت پایانی)", 
     type=['csv'], 
     accept_multiple_files=True
 )
-with st.sidebar.expander("دریافت داده از یاهو فاینانس"):
-    tickers = st.text_input("نمادها (مثال: BTC-USD,AAPL,ETH-USD)", "")
-    if st.button("دانلود داده"):
-        data_yf = yf.download(
-            tickers=[t.strip() for t in tickers.split(",") if t.strip()],
-            start=str(date_start), end=str(date_end)
-        )
-        if not data_yf.empty:
-            for t in tickers.split(","):
-                t = t.strip()
-                if t == "":
-                    continue
-                try:
-                    df = data_yf[t].reset_index()[['Date', 'Adj Close']].rename(columns={'Adj Close': 'Price'})
-                except Exception:
-                    df = data_yf.reset_index()[['Date', 'Adj Close']].rename(columns={'Adj Close': 'Price'})
-                df.to_csv(f"{t}.csv", index=False)
-                st.success(f"داده {t} با موفقیت آماده شد. می‌توانید آن را به ابزار آپلود کنید.")
 
-# پردازش فایل‌های آپلودشده با اولویت Adj Close و قبول سایر اسامی متداول قیمت پایانی
+# پردازش فایل‌ها
 prices_df = pd.DataFrame()
 asset_names = []
 weight_settings = {}
 
-# لیست اسامی متداول برای ستون قیمت پایانی
+# اسامی متداول ستون قیمت بسته
 price_columns_possible = [
     "Adj Close", "adj close", "AdjClose", "adjclose",
     "Close", "close", "Last", "last", "Price", "price",
@@ -73,7 +63,7 @@ if uploaded_files:
     for file in uploaded_files:
         name = file.name.split('.')[0]
         df = pd.read_csv(file)
-        # جستجوی ستون قیمت پایانی با اولویت بیشتر و پشتیبانی از اسامی فارسی
+        # پیدا کردن ستون قیمت
         price_col = None
         for col in price_columns_possible:
             if col in df.columns:
@@ -89,10 +79,9 @@ if uploaded_files:
         if "Date" not in df.columns:
             st.error(f"فایل {file.name} باید دارای ستون تاریخ (Date) باشد! ستون‌های فعلی: {list(df.columns)}")
             continue
-        # پاک‌سازی و تبدیل قیمت به عدد
+        # پاک‌سازی و تبدیل به عدد
         df = df[["Date", price_col]].rename(columns={price_col: name})
         df["Date"] = pd.to_datetime(df["Date"])
-        # پاک‌سازی داده قیمت: حذف کاما، تبدیل اعشاری فارسی، حذف هزارگان فارسی و تبدیل به float
         df[name] = (
             df[name]
             .astype(str)
@@ -108,126 +97,205 @@ if uploaded_files:
         asset_names.append(name)
     prices_df.dropna(inplace=True)
 
-    # محدودیت و وزن اولیه برای هر دارایی
+    # محدودیت وزن هر دارایی
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### ⚖️ محدودیت و وزن اولیه هر دارایی")
+    st.sidebar.subheader("محدودیت وزن هر دارایی (٪)")
     for name in asset_names:
-        min_w = st.sidebar.number_input(f"حداقل وزن {name} (%)", 0.0, 100.0, 0.0, 1.0, key=f"min_{name}") / 100
-        max_w = st.sidebar.number_input(f"حداکثر وزن {name} (%)", 0.0, 100.0, 100.0, 1.0, key=f"max_{name}") / 100
-        init_w = st.sidebar.number_input(f"وزن اولیه {name} (%)", min_w*100, max_w*100, ((min_w+max_w)/2)*100, 1.0, key=f"init_{name}") / 100
-        weight_settings[name] = {'min': min_w, 'max': max_w, 'init': init_w}
+        min_w = st.sidebar.number_input(f"حداقل وزن {name}", 0.0, 100.0, 0.0, 1.0, key=f"min_{name}") / 100
+        max_w = st.sidebar.number_input(f"حداکثر وزن {name}", 0.0, 100.0, 100.0, 1.0, key=f"max_{name}") / 100
+        weight_settings[name] = {'min': min_w, 'max': max_w}
 
-# تحلیل پرتفو
+# تحلیل پرتفو و نمایش نتایج
 if not prices_df.empty:
     st.markdown("### 📈 داده‌های قیمت پایانی تعدیل‌شده دارایی‌ها")
     st.dataframe(prices_df.tail())
 
-    returns = prices_df.pct_change().dropna()
-    mean_ret = returns.mean() * 252
-    cov = returns.cov() * 252
-
-    # توابع بازده و ریسک پرتفو
-    def portfolio_return(weights):
-        return np.dot(weights, mean_ret)
-    def portfolio_risk(weights):
-        return np.sqrt(np.dot(weights.T, np.dot(cov, weights)))
-
-    results = []
-    for _ in range(n_portfolios):
-        while True:
-            w = np.random.dirichlet(np.ones(len(asset_names)))
-            legal = True
-            for i, n in enumerate(asset_names):
-                if not (weight_settings[n]['min'] <= w[i] <= weight_settings[n]['max']):
-                    legal = False
-            if legal:
-                break
-        port_ret = portfolio_return(w)
-        port_risk = portfolio_risk(w)
-        port_sorted = np.dot(returns.values, w)
-        downside = port_sorted[port_sorted < target_return]
-        sortino = (port_ret - target_return) / (np.std(downside) + 1e-8) if len(downside) > 0 else 0
-        omega = np.sum(port_sorted > target_return) / (np.abs(np.sum(port_sorted < target_return)) + 1e-8)
-        cvar = np.mean(port_sorted[port_sorted <= np.percentile(port_sorted, (1-cvar_alpha)*100)]) if len(port_sorted) > 0 else 0
-        var = np.percentile(port_sorted, (1-cvar_alpha)*100) if len(port_sorted) > 0 else 0
-        cum = (1 + port_sorted).cumprod()
-        peak = np.maximum.accumulate(cum)
-        drawdowns = (cum - peak) / peak
-        max_dd = drawdowns.min()
-        sharpe = port_ret / (port_risk + 1e-8)
-        results.append({
-            "weights": w, "return": port_ret, "risk": port_risk, "sortino": sortino,
-            "omega": omega, "cvar": cvar, "var": var, "drawdown": max_dd, "sharpe": sharpe
-        })
-
-    # انتخاب پرتفو بهینه بر اساس روش انتخابی
-    if method == "Sharpe (مرز کارا)":
-        best = max(results, key=lambda x: x["sharpe"])
-        explain = "پرتفو با بیشترین نسبت شارپ (مرز کارا)."
-    elif method == "Sortino":
-        best = max(results, key=lambda x: x["sortino"])
-        explain = "پرتفو با بیشترین نسبت سورتینو (توجه به زیان پایین‌تر از بازده هدف)."
-    elif method == "Omega":
-        best = max(results, key=lambda x: x["omega"])
-        explain = "پرتفو با بیشترین نسبت امگا (سود به زیان)."
-    elif method == "CVaR":
-        best = max(results, key=lambda x: x["cvar"])
-        explain = "پرتفو با کمترین CVaR (ارزش در معرض ریسک مشروط)."
-    elif method == "VaR":
-        best = min(results, key=lambda x: x["var"])
-        explain = "پرتفو با کمترین VaR (ارزش در معرض ریسک)."
-    elif method == "Max Drawdown":
-        best = max(results, key=lambda x: x["drawdown"])
-        explain = "پرتفو با کمترین افت سرمایه (Max Drawdown)."
+    # تعیین فرکانس داده و ضریب سالانه‌سازی
+    freq = pd.infer_freq(prices_df.index)
+    if freq is None:
+        freq = "D"
+    if freq[0].lower() == "m":
+        factor = 12
+    elif freq[0].lower() == "w":
+        factor = 52
     else:
-        best = results[0]
-        explain = "-"
+        factor = 252
 
-    # نمایش نتایج
-    st.markdown(f"### 📊 خلاصه پرتفو بهینه ({method})")
-    st.markdown(f"- **بازده سالانه:** {best['return']*100:.2f}%")
-    st.markdown(f"- **ریسک سالانه:** {best['risk']*100:.2f}%")
-    st.markdown(f"- **نسبت شارپ:** {best['sharpe']:.2f}")
-    st.markdown(f"- **سورتینو:** {best['sortino']:.2f}")
-    st.markdown(f"- **امگا:** {best['omega']:.2f}")
-    st.markdown(f"- **CVaR ({int(cvar_alpha*100)}%):** {best['cvar']*100:.2f}%")
-    st.markdown(f"- **VaR ({int(cvar_alpha*100)}%):** {best['var']*100:.2f}%")
-    st.markdown(f"- **Max Drawdown:** {best['drawdown']*100:.2f}%")
-    st.markdown(f"**{explain}**")
+    returns = prices_df.pct_change().dropna()
+    mean_ret = returns.mean() * factor
+    cov = returns.cov() * factor
 
-    st.markdown("#### 📋 جدول وزن پرتفو")
-    dfw = pd.DataFrame({'دارایی': asset_names, 'وزن (%)': np.round(best['weights']*100, 2)})
-    st.dataframe(dfw.set_index('دارایی'), use_container_width=True)
+    # توابع پرتفو
+    def portfolio_return(weights): return np.dot(weights, mean_ret)
+    def portfolio_risk(weights): return np.sqrt(np.dot(weights.T, np.dot(cov, weights)))
 
-    # نمودار وزنی پرتفو
-    st.markdown("#### 📈 نمودار وزنی پرتفو")
-    fig = go.Figure(data=[go.Pie(labels=asset_names, values=best['weights'], hole=0.5)])
-    st.plotly_chart(fig, use_container_width=True)
+    # محدوده ریسک کاربر
+    min_risk_user = min_risk / 100
+    max_risk_user = max_risk / 100
 
-    # مرز کارا: محور x ریسک، محور y بازده، طیف رنگی نسبت شارپ و علامت پرتفو بهینه
-    st.markdown("#### 🌈 مرز کارا و طیف رنگی نسبت شارپ")
-    df_res = pd.DataFrame(results)
-    fig2 = px.scatter(
-        df_res, x=df_res["risk"]*100, y=df_res["return"]*100, color="sharpe",
-        labels={'risk': 'ریسک (%)', 'return': 'بازده (%)', 'sharpe': 'نسبت شارپ'},
-        title="مرز کارا پرتفوها (محور افقی: ریسک، محور عمودی: بازده، رنگ: نسبت شارپ)",
-        color_continuous_scale="Viridis"
-    )
-    fig2.add_trace(go.Scatter(
-        x=[best["risk"]*100], y=[best["return"]*100], mode="markers+text",
-        marker=dict(size=14, color="red"), text=["پرتفو بهینه"], textposition="top center"
-    ))
-    st.plotly_chart(fig2, use_container_width=True)
+    # سبک‌ها
+    styles = [
+        ("Sharpe", "پرتفو با بیشترین نسبت شارپ. بهترین ترکیب بازده-ریسک کلاسیک."),
+        ("Sortino", "پرتفو با بیشترین نسبت سورتینو (بازده نسبت به زیان پایین‌تر از هدف)."),
+        ("Omega", "پرتفو با بیشترین نسبت امگا (نسبت سود به زیان)."),
+        ("CVaR", f"پرتفو با کمترین CVaR (ارزش در معرض ریسک مشروط) در سطح اطمینان {int(cvar_alpha*100)}٪."),
+        ("VaR", f"پرتفو با کمترین VaR (ارزش در معرض ریسک) در سطح اطمینان {int(cvar_alpha*100)}٪."),
+        ("Max Drawdown", "پرتفو با کمترین افت سرمایه (Max Drawdown)."),
+        ("Monte Carlo", "پرتفو بهینه با شبیه‌سازی تصادفی Monte Carlo.")
+    ]
+
+    all_results = {}
+    all_best = []
+
+    for style, style_desc in styles:
+        results = []
+        for _ in range(n_portfolios):
+            # وزن‌ها با محدودیت کاربر
+            while True:
+                w = np.random.dirichlet(np.ones(len(asset_names)))
+                legal = True
+                for i, n in enumerate(asset_names):
+                    if not (weight_settings[n]['min'] <= w[i] <= weight_settings[n]['max']):
+                        legal = False
+                if legal:
+                    break
+            port_ret = portfolio_return(w)
+            port_risk = portfolio_risk(w)
+            port_sorted = np.dot(returns.values, w)
+            downside = port_sorted[port_sorted < target_return]
+            sortino = (port_ret - target_return) / (np.std(downside) + 1e-8) if len(downside) > 0 else 0
+            omega = np.sum(port_sorted > target_return) / (np.abs(np.sum(port_sorted < target_return)) + 1e-8)
+            cvar = np.mean(port_sorted[port_sorted <= np.percentile(port_sorted, (1-cvar_alpha)*100)]) if len(port_sorted) > 0 else 0
+            var = np.percentile(port_sorted, (1-cvar_alpha)*100) if len(port_sorted) > 0 else 0
+            cum = (1 + port_sorted).cumprod()
+            peak = np.maximum.accumulate(cum)
+            drawdowns = (cum - peak) / peak
+            max_dd = drawdowns.min()
+            sharpe = port_ret / (port_risk + 1e-8)
+            results.append({
+                "weights": w, "return": port_ret, "risk": port_risk, "sortino": sortino,
+                "omega": omega, "cvar": cvar, "var": var, "drawdown": max_dd, "sharpe": sharpe
+            })
+        df_res = pd.DataFrame(results)
+        # فیلتر محدوده ریسک
+        df_res = df_res[(df_res["risk"] >= min_risk_user) & (df_res["risk"] <= max_risk_user)]
+        if df_res.empty:
+            st.warning(f"در سبک {style} هیچ سبدی در محدوده ریسک انتخابی پیدا نشد!")
+            continue
+        # انتخاب بهترین سبد هر سبک
+        if style == "Sharpe":
+            best = df_res.loc[df_res["sharpe"].idxmax()]
+            best_desc = "بیشترین نسبت شارپ"
+        elif style == "Sortino":
+            best = df_res.loc[df_res["sortino"].idxmax()]
+            best_desc = "بیشترین نسبت سورتینو"
+        elif style == "Omega":
+            best = df_res.loc[df_res["omega"].idxmax()]
+            best_desc = "بیشترین نسبت امگا"
+        elif style == "CVaR":
+            best = df_res.loc[df_res["cvar"].idxmin()]
+            best_desc = "کمترین CVaR"
+        elif style == "VaR":
+            best = df_res.loc[df_res["var"].idxmin()]
+            best_desc = "کمترین VaR"
+        elif style == "Max Drawdown":
+            best = df_res.loc[df_res["drawdown"].idxmax()]
+            best_desc = "کمترین افت سرمایه"
+        elif style == "Monte Carlo":
+            # بیشترین شارپ در مونت کارلو
+            best = df_res.loc[df_res["sharpe"].idxmax()]
+            best_desc = "بهترین سبد مونت کارلو (شارپ ماکزیمم)"
+        all_results[style] = (df_res, best)
+        # فقط سبدهایی که درادون بزرگتر از -0.3 (یعنی افت کمتر از ۳۰٪) دارند برای انتخاب نهایی
+        if best["drawdown"] >= -0.3:
+            all_best.append((style, best, best_desc))
+        # نمایش توضیحات و پارامترها
+        st.markdown(f"---\n### {style} {': ' + best_desc if best_desc else ''}")
+        st.markdown(f"**{style_desc}**")
+        # پارامترهای ورودی این سبک
+        if style in ["Sortino", "Omega"]:
+            st.info(f"بازده هدف: {target_return*100:.2f}%")
+        if style in ["CVaR", "VaR"]:
+            st.info(f"سطح اطمینان: {int(cvar_alpha*100)}٪")
+        # مرز کارا
+        fig2 = px.scatter(
+            df_res, x=df_res["risk"]*100, y=df_res["return"]*100, color="sharpe",
+            labels={'risk': 'ریسک (%)', 'return': 'بازده (%)', 'sharpe': 'نسبت شارپ'},
+            title=f"مرز کارا پرتفوها ({style})",
+            color_continuous_scale="Viridis"
+        )
+        fig2.add_trace(go.Scatter(
+            x=[best["risk"]*100], y=[best["return"]*100], mode="markers+text",
+            marker=dict(size=14, color="red"), text=["سبد بهینه"], textposition="top center"
+        ))
+        st.plotly_chart(fig2, use_container_width=True)
+        # جدول وزن پرتفو
+        st.markdown("#### 📋 وزن پرتفو سبد بهینه")
+        dfw = pd.DataFrame({'دارایی': asset_names, 'وزن (%)': np.round(best['weights']*100, 2)})
+        st.dataframe(dfw.set_index('دارایی'), use_container_width=True)
+        # خروجی‌ها
+        st.markdown(f"""
+        - **بازده سالانه:** {best['return']*100:.2f}%
+        - **ریسک سالانه:** {best['risk']*100:.2f}%
+        - **نسبت شارپ:** {best['sharpe']:.2f}
+        - **سورتینو:** {best['sortino']:.2f}
+        - **امگا:** {best['omega']:.2f}
+        - **CVaR ({int(cvar_alpha*100)}%):** {best['cvar']*100:.2f}%
+        - **VaR ({int(cvar_alpha*100)}%):** {best['var']*100:.2f}%
+        - **Max Drawdown:** {best['drawdown']*100:.2f}%
+        """)
+        # توضیح روش و نحوه استفاده
+        st.info(f"**راهنمای استفاده {style}:** {style_desc}")
+
+    # ماشین پیش‌بینی قیمت هر دارایی
+    st.markdown("---\n## 🤖 پیش‌بینی قیمت هر دارایی (مدل ساده ARIMA)")
+    pred_periods = st.slider("تعداد دوره‌های پیش‌بینی (برای هر دارایی)", 3, 24, 12, 1)
+    for name in asset_names:
+        ts = prices_df[name]
+        try:
+            model = ARIMA(ts, order=(1,1,1)).fit()
+            pred = model.forecast(steps=pred_periods)
+            df_pred = pd.concat([ts, pred])
+            fig_pred = px.line(
+                df_pred, 
+                title=f"پیش‌بینی قیمت {name}",
+                labels={"value": "قیمت", "index": "تاریخ"}
+            )
+            fig_pred.add_vline(x=ts.index[-1], line_dash="dot", line_color="red")
+            st.plotly_chart(fig_pred, use_container_width=True)
+        except Exception as e:
+            st.warning(f"پیش‌بینی قیمت برای {name} ممکن نشد! ({e})")
+
+    # انتخاب بهترین سبد نهایی با کمترین ریسک و بیشترین بازده و حداکثر درادون ۳۰٪
+    st.markdown("---\n## 🏆 بهترین پرتفو با شرط افت سرمایه حداکثر 30٪")
+    if all_best:
+        best_tuple = max(all_best, key=lambda x: (x[1]["return"], -x[1]["risk"]))
+        style, best, desc = best_tuple
+        st.success(f"سبد پیشنهادی بر اساس سبک '{style}' ({desc})")
+        dfw = pd.DataFrame({'دارایی': asset_names, 'وزن (%)': np.round(best['weights']*100, 2)})
+        st.dataframe(dfw.set_index('دارایی'), use_container_width=True)
+        st.markdown(f"""
+        - **بازده سالانه:** {best['return']*100:.2f}%
+        - **ریسک سالانه:** {best['risk']*100:.2f}%
+        - **نسبت شارپ:** {best['sharpe']:.2f}
+        - **سورتینو:** {best['sortino']:.2f}
+        - **امگا:** {best['omega']:.2f}
+        - **CVaR ({int(cvar_alpha*100)}%):** {best['cvar']*100:.2f}%
+        - **VaR ({int(cvar_alpha*100)}%):** {best['var']*100:.2f}%
+        - **Max Drawdown:** {best['drawdown']*100:.2f}%
+        """)
+    else:
+        st.warning("هیچ پرتفوئی با شرط افت سرمایه کمتر از ۳۰٪ پیدا نشد!")
 
     st.markdown("""
     <div dir="rtl" style="text-align:right;">
-    <b>یادآوری:</b><br>
-    - فایل هر دارایی را فقط با نام فایل (بدون نیاز به مسیر کامل) آپلود کنید.<br>
-    - قیمت پایانی تعدیل‌شده یا هر قیمت بسته متداول، به صورت هوشمند استخراج و استفاده می‌شود.<br>
-    - تمامی نتایج به درصد نمایش داده می‌شود.<br>
-    - مرز کارا، نمودار وزنی و شاخص‌های مهم پرتفو کاملا حرفه‌ای و کاربردی ارائه شده است.<br>
+    <b>راهنما:</b><br>
+    - همه سبک‌های پرتفو همزمان محاسبه و مقایسه می‌شوند.<br>
+    - برای هر سبک، مرز کارا، پارامترهای ورودی و خروجی، سبد بهینه و توضیحات کامل نمایش داده می‌شود.<br>
+    - ماشین پیش‌بینی قیمت برای هر دارایی با مدل ARIMA ارائه شده است.<br>
+    - بهترین پرتفو با کمترین ریسک و بیشترین بازده و افت سرمایه حداکثر ۳۰٪ جداگانه معرفی می‌شود.<br>
+    - می‌توانید حداقل و حداکثر وزن هر دارایی، محدوده ریسک پرتفوها و پارامترهای تخصصی هر سبک را تنظیم کنید.<br>
     </div>
     """, unsafe_allow_html=True)
-
 else:
-    st.info("لطفاً ابتدا داده قیمت دارایی‌ها را آپلود کنید یا از یاهو فاینانس دانلود نمایید.")
+    st.info("لطفاً ابتدا داده قیمت دارایی‌ها را آپلود کنید.")
