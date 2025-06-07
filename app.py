@@ -4,6 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import yfinance as yf
+import base64
 
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو، CVaR و Married Put", layout="wide")
 st.title("📊 ابزار تحلیل پرتفو با روش مونت‌کارلو، CVaR و استراتژی Married Put")
@@ -49,10 +50,13 @@ def read_csv_file(file):
             raise Exception("ستون تاریخ با نام 'Date' یا مشابه آن یافت نشد.")
         date_col = date_col[0]
 
-        # پیدا کردن یک ستون قیمت مناسب
-        price_candidates = [c for c in df.columns if str(c).strip().lower() in ['price', 'close', 'open']]
+        # پیدا کردن یک ستون قیمت مناسب (Case-insensitive)
+        price_candidates = [c for c in df.columns if str(c).strip().lower() in ['price', 'close', 'adj close', 'open']]
         if not price_candidates:
-            raise Exception("ستون قیمت ('Price' یا 'Close' یا 'Open') یافت نشد.")
+            # اگر هیچ کدام نبود، اولین ستون عددی غیر از تاریخ را پیدا کن
+            price_candidates = [c for c in df.columns if c != date_col]
+        if not price_candidates:
+            raise Exception("ستون قیمت مناسب یافت نشد.")
         price_col = price_candidates[0]
 
         df = df[[date_col, price_col]].rename(columns={date_col: "Date", price_col: "Price"})
@@ -132,6 +136,11 @@ if download_btn and tickers_input.strip():
                 df['Date'] = pd.to_datetime(df['Date'])
                 downloaded_dfs.append((t, df))
                 st.success(f"داده {t} با موفقیت دانلود شد.")
+                # لینک دانلود فایل CSV برای هر دارایی
+                csv = df.reset_index(drop=True).to_csv(index=False).encode()
+                b64 = base64.b64encode(csv).decode()
+                href = f'<a href="data:file/csv;base64,{b64}" download="{t}_historical.csv">⬇️ دریافت فایل CSV {t}</a>'
+                st.markdown(href, unsafe_allow_html=True)
         else:
             st.error("داده‌ای دریافت نشد!")
     except Exception as ex:
