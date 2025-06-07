@@ -6,8 +6,8 @@ import plotly.express as px
 from datetime import datetime
 import yfinance as yf
 
-st.set_page_config(page_title="Portfolio360 v9 - تحلیل پرتفو و مدیریت ریسک", layout="wide")
-st.title("📊 Portfolio360 v9 - ابزار حرفه‌ای تحلیل پرتفو و مدیریت ریسک")
+st.set_page_config(page_title="Portfolio360 v10 - تحلیل پرتفو و مدیریت ریسک", layout="wide")
+st.title("📊 Portfolio360 v10 - ابزار حرفه‌ای تحلیل پرتفو و مدیریت ریسک")
 
 # ----- تنظیمات سایدبار -----
 st.sidebar.header("🔧 تنظیمات تحلیل")
@@ -89,8 +89,19 @@ if uploaded_files:
         if "Date" not in df.columns:
             st.error(f"فایل {file.name} باید دارای ستون تاریخ (Date) باشد! ستون‌های فعلی: {list(df.columns)}")
             continue
+        # پاک‌سازی و تبدیل قیمت به عدد
         df = df[["Date", price_col]].rename(columns={price_col: name})
         df["Date"] = pd.to_datetime(df["Date"])
+        # پاک‌سازی داده قیمت: حذف کاما، تبدیل اعشاری فارسی، حذف هزارگان فارسی و تبدیل به float
+        df[name] = (
+            df[name]
+            .astype(str)
+            .str.replace(",", "", regex=False)
+            .str.replace("٫", ".", regex=False)
+            .str.replace("،", "", regex=False)
+        )
+        df[name] = pd.to_numeric(df[name], errors='coerce')
+        df = df.dropna(subset=[name, "Date"])
         df = df.set_index("Date")
         df = df[(df.index >= pd.to_datetime(date_start)) & (df.index <= pd.to_datetime(date_end))]
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
@@ -212,7 +223,7 @@ if not prices_df.empty:
     <div dir="rtl" style="text-align:right;">
     <b>یادآوری:</b><br>
     - فایل هر دارایی را فقط با نام فایل (بدون نیاز به مسیر کامل) آپلود کنید.<br>
-    - قیمت پایانی تعدیل‌شده (Adj Close) یا هر قیمت بسته متداول، به صورت هوشمند استخراج و استفاده می‌شود.<br>
+    - قیمت پایانی تعدیل‌شده یا هر قیمت بسته متداول، به صورت هوشمند استخراج و استفاده می‌شود.<br>
     - تمامی نتایج به درصد نمایش داده می‌شود.<br>
     - مرز کارا، نمودار وزنی و شاخص‌های مهم پرتفو کاملا حرفه‌ای و کاربردی ارائه شده است.<br>
     </div>
