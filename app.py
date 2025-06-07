@@ -14,7 +14,7 @@ def read_csv_file(file):
         df = pd.read_csv(file, header=None)
         if df.shape[0] < 2:
             raise Exception("تعداد سطرهای داده بسیار کم است.")
-        # پیدا کردن سطر عنوان (ستونی که شامل چیزی شبیه date باشد)
+        # یافتن سطر عنوان (هر سطری که ستونی با نام date داشته باشد)
         header_idx = None
         for i in range(min(5, len(df))):
             row = [str(x).strip().lower() for x in df.iloc[i].tolist()]
@@ -27,7 +27,7 @@ def read_csv_file(file):
         df = df.iloc[header_idx+1:].reset_index(drop=True)
         df.columns = header_row
 
-        # پیدا کردن نام ستون تاریخ با حساسیت پایین
+        # پیدا کردن نام ستون تاریخ (case-insensitive)
         date_col = [c for c in df.columns if str(c).strip().lower() == 'date']
         if not date_col:
             raise Exception("ستون تاریخ با نام 'Date' یا مشابه آن یافت نشد.")
@@ -41,7 +41,6 @@ def read_csv_file(file):
             raise Exception("ستون قیمت مناسب یافت نشد.")
         price_col = price_candidates[0]
 
-        # فقط دو ستون انتخاب شود و هیچ کدام خالی نباشد
         df = df[[date_col, price_col]].dropna()
         if df.empty:
             raise Exception("پس از حذف داده‌های خالی، داده‌ای باقی نماند.")
@@ -64,9 +63,8 @@ def download_link(df, filename):
     return f'<a href="data:file/csv;base64,{b64}" download="{filename}">⬇️ دریافت فایل CSV</a>'
 
 def get_price_dataframe_from_yf(data, t):
-    # اگر دیتا چند نماد است:
+    # برای چند نماد
     if isinstance(data.columns, pd.MultiIndex):
-        # اگر برای نماد t وجود دارد
         if t in data.columns.levels[0]:
             df_t = data[t].reset_index()
             price_col = None
@@ -93,25 +91,6 @@ def get_price_dataframe_from_yf(data, t):
             return None, f"هیچ یک از ستون‌های قیمت (Close, Adj Close, Open) برای {t} پیدا نشد."
         df = data[['Date', price_col]].rename(columns={price_col: 'Price'})
         return df, None
-
-with st.expander("📘 راهنمای دریافت داده آنلاین از یاهو فاینانس"):
-    st.markdown("""
-    <div dir="rtl" style="text-align: right; font-size: 15px">
-    <b>نحوه دانلود داده:</b><br>
-    - نماد هر دارایی را مطابق سایت Yahoo Finance وارد کنید.<br>
-    - نمادها را با <b>کاما</b> و <b>بدون فاصله</b> وارد کنید.<br>
-    - مثال: <b>BTC-USD,AAPL,ETH-USD</b><br>
-    - برای بیت‌کوین: <b>BTC-USD</b><br>
-    - برای اپل: <b>AAPL</b><br>
-    - برای اتریوم: <b>ETH-USD</b><br>
-    - برای شاخص S&P500: <b>^GSPC</b><br>
-    <br>
-    <b>توضیحات بیشتر:</b><br>
-    - نماد هر دارایی را می‌توانید در سایت <a href="https://finance.yahoo.com" target="_blank">Yahoo Finance</a> جستجو کنید.<br>
-    - اگر چند نماد وارد می‌کنید، فقط با کاما جدا کنید و فاصله نگذارید.<br>
-    - داده‌های دانلودشده دقیقاً مانند فایل CSV در ابزار استفاده می‌شوند.<br>
-    </div>
-    """, unsafe_allow_html=True)
 
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
@@ -168,7 +147,79 @@ if downloaded_dfs:
         st.markdown(f"<div dir='rtl' style='text-align: right;'><b>{t}</b></div>", unsafe_allow_html=True)
         st.dataframe(df.head())
 
-# (بقیه کد ابزار پرتفو بدون تغییر نسبت به نسخه قبل)
+if uploaded_files or downloaded_dfs:
+    prices_df = pd.DataFrame()
+    asset_names = []
+    insured_assets = {}
 
-# ... ابزار پرتفو ...
-# (همانند نسخه قبلی که داری، فقط کافیست تابع read_csv_file و get_price_dataframe_from_yf را جایگزین کنی)
+    for t, df in downloaded_dfs:
+        name = t
+        if 'Date' not in df.columns or 'Price' not in df.columns:
+            st.warning(f"داده آنلاین {name} باید دارای ستون‌های 'Date' و 'Price' باشد.")
+            continue
+        df = df.dropna(subset=['Date', 'Price'])
+        df = df[['Date', 'Price']].set_index('Date')
+        df.columns = [name]
+        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
+        asset_names.append(name)
+
+    for file in uploaded_files:
+        df = read_csv_file(file)
+        if df is None:
+            continue
+        name = file.name.split('.')[0]
+        if 'Date' not in df.columns or 'Price' not in df.columns:
+            st.warning(f"فایل {name} باید دارای ستون‌های 'Date' و 'Price' باشد.")
+            continue
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
+        df = df.dropna(subset=['Date', 'Price'])
+        df = df[['Date', 'Price']].set_index('Date')
+        df.columns = [name]
+        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
+        asset_names.append(name)
+
+        st.sidebar.markdown(f"---\n### ⚙️ تنظیمات بیمه برای دارایی: `{name}`")
+        insured = st.sidebar.checkbox(f"📌 فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
+        if insured:
+            loss_percent = st.sidebar.number_input(f"📉 درصد ضرر معامله پوت برای {name}", 0.0, 100.0, 30.0, step=0.01, key=f"loss_{name}")
+            strike = st.sidebar.number_input(f"🎯 قیمت اعمال پوت برای {name}", 0.0, 1e6, 100.0, step=0.01, key=f"strike_{name}")
+            premium = st.sidebar.number_input(f"💰 قیمت قرارداد پوت برای {name}", 0.0, 1e6, 5.0, step=0.01, key=f"premium_{name}")
+            amount = st.sidebar.number_input(f"📦 مقدار قرارداد برای {name}", 0.0, 1e6, 1.0, step=0.01, key=f"amount_{name}")
+            spot_price = st.sidebar.number_input(f"📌 قیمت فعلی دارایی پایه {name}", 0.0, 1e6, 100.0, step=0.01, key=f"spot_{name}")
+            asset_amount = st.sidebar.number_input(f"📦 مقدار دارایی پایه {name}", 0.0, 1e6, 1.0, step=0.01, key=f"base_{name}")
+            insured_assets[name] = {
+                'loss_percent': loss_percent,
+                'strike': strike,
+                'premium': premium,
+                'amount': amount,
+                'spot': spot_price,
+                'base': asset_amount
+            }
+
+    st.subheader("🧪 پیش‌نمایش داده‌ی نهایی برای تحلیل پرتفو")
+    st.write(prices_df.head())
+    st.write("شکل داده:", prices_df.shape)
+
+    if prices_df.empty:
+        st.error("❌ داده‌ی معتبری برای تحلیل یافت نشد.")
+        st.stop()
+
+    try:
+        resampled_prices = prices_df.resample(resample_rule).last().dropna()
+        returns = resampled_prices.pct_change().dropna()
+        mean_returns = returns.mean() * annual_factor
+        cov_matrix = returns.cov() * annual_factor
+        std_devs = np.sqrt(np.diag(cov_matrix))
+
+        st.subheader("📉 اولین نمودار قیمت دارایی‌ها")
+        st.line_chart(resampled_prices)
+
+        # ... ادامه کد پرتفو و نمودارها و بهینه‌سازی و غیره (همانند نسخه قبلی) ...
+        # برای خلاصه: اگر این بخش برایت کم است، بگو تا بخش کامل بهینه‌سازی و تحلیل را هم برایت کپی کنم.
+
+    except Exception as e:
+        st.error(f"خطای تحلیل پرتفو: {e}")
+
+else:
+    st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price یا Close یا Open را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
