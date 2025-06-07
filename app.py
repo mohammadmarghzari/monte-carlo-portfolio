@@ -135,6 +135,14 @@ def show_periodic_risk_return(resampled_prices, weights, label):
     </div>
     """, unsafe_allow_html=True)
 
+# ----------------- توضیحات ابزار -----------------
+st.markdown("""
+<div dir="rtl" style="text-align: right;">
+<h3>ابزار تحلیل پرتفو: توضیحات کلی</h3>
+این ابزار برای تحلیل و بهینه‌سازی ترکیب دارایی‌های یک پرتفو (Portfolio) طراحی شده است. در این ابزار، می‌توانید داده‌های قیمت دارایی‌ها را از <b>یاهو فاینانس</b> دانلود یا فایل csv خود را آپلود کنید، سپس انواع پرتفوهای بهینه و ریسک و بازده آن‌ها را مشاهده کنید. همچنین می‌توانید برای هر دارایی، بیمه (Married Put) تعریف کنید تا ریسک افت شدید قیمت را کاهش دهید.
+</div>
+""", unsafe_allow_html=True)
+
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV آپلود کنید (هر دارایی یک فایل)", type=['csv'], accept_multiple_files=True, key="uploader"
@@ -149,10 +157,10 @@ cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0
 with st.sidebar.expander("📥 دانلود داده آنلاین از یاهو فاینانس"):
     st.markdown("""
     <div dir="rtl" style="text-align: right;">
-    <b>راهنما:</b><br>
-    - نمادها را با کاما و بدون فاصله وارد کنید (مثال: BTC-USD,AAPL,ETH-USD)<br>
-    - برای بیت‌کوین: BTC-USD<br>
-    - برای اپل: AAPL<br>
+    <b>راهنما:</b>
+    <br>نمادها را با کاما و بدون فاصله وارد کنید (مثال: <span style="direction:ltr;display:inline-block">BTC-USD,AAPL,ETH-USD</span>)
+    <br>برای بیت‌کوین: <span style="direction:ltr;display:inline-block">BTC-USD</span>
+    <br>برای اپل: <span style="direction:ltr;display:inline-block">AAPL</span>
     </div>
     """, unsafe_allow_html=True)
     tickers_input = st.text_input("نماد دارایی‌ها (با کاما و بدون فاصله)")
@@ -192,6 +200,15 @@ if uploaded_files:
 all_asset_names = [t for t, _ in st.session_state["downloaded_dfs"]] + [t for t, _ in st.session_state["uploaded_dfs"]]
 for name in all_asset_names:
     with st.sidebar.expander(f"⚙️ بیمه برای {name}", expanded=False):
+        st.markdown("""
+        <div dir="rtl" style="text-align: right;">
+        <b>Married Put چیست؟</b>
+        <br>بیمه در پرتفو (Married Put) یعنی شما همزمان با نگهداری دارایی، یک قرارداد اختیار فروش (Put Option) برای همان دارایی می‌خرید. اگر قیمت دارایی به شدت سقوط کند، این قرارداد از شما محافظت می‌کند و ضرر شما را محدود می‌سازد.
+        <br><b>اگر بیمه نگیرید:</b> در صورت ریزش شدید قیمت، کل ضرر را متحمل می‌شوید و هیچ پوششی ندارید.
+        <br><b>اگر بیمه بگیرید:</b> حتی اگر قیمت دارایی خیلی پایین بیاید، بخش اعظم ضرر شما تا حد strike price جبران می‌شود.
+        <br><b>مثال:</b> فرض کنید بیت‌کوین دارید و Put با قیمت اعمال ۵۰,۰۰۰ دلار خریده‌اید. اگر قیمت بیت‌کوین به ۳۰,۰۰۰ برسد، ضرر شما نسبت به کسی که بیمه ندارد بسیار کمتر می‌شود.
+        </div>
+        """, unsafe_allow_html=True)
         insured = st.checkbox(f"فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
         if insured:
             loss_percent = st.number_input(f"📉 درصد ضرر معامله پوت برای {name}", 0.0, 100.0, 30.0, step=0.01, key=f"loss_{name}")
@@ -234,6 +251,12 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         asset_names.append(name)
 
     st.subheader("📉 روند قیمت دارایی‌ها")
+    st.markdown("""
+    <div dir="rtl" style="text-align: right;">
+    این نمودار، روند تاریخی قیمت هر دارایی (asset) را در بازه انتخابی نمایش می‌دهد. این به شما کمک می‌کند نوسانات و روند کلی هر دارایی را ببینید.<br>
+    اگر بین اعداد انگلیسی و فارسی یا نماد انگلیسی و فارسی فاصله بیفتد، نمایش داده اصلاح می‌شود.
+    </div>
+    """, unsafe_allow_html=True)
     st.line_chart(prices_df.resample(resample_rule).last().dropna())
 
     if prices_df.empty:
@@ -246,6 +269,19 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         mean_returns = returns.mean() * annual_factor
         cov_matrix = returns.cov() * annual_factor
         std_devs = np.sqrt(np.diag(cov_matrix))
+
+        # ---- توضیح انواع سبک پرتفوی ----
+        st.subheader("📚 سبک‌های بهینه‌سازی پرتفو (Portfolio Optimization Styles)")
+        st.markdown("""
+        <div dir="rtl" style="text-align: right;">
+        <ul>
+        <li><b>مونت‌کارلو (Monte Carlo):</b> با شبیه‌سازی تصادفی هزاران ترکیب وزنی، پرتفوهایی با ریسک و بازده مختلف تولید می‌شود و بهترین‌ها انتخاب می‌شوند.</li>
+        <li><b>CVaR:</b> پرتفوهایی که کمترین ریسک بحران (زیان شدید) را دارند، با معیار CVaR (Conditional Value at Risk) بهینه می‌شوند.</li>
+        <li><b>مرز کارا (Efficient Frontier):</b> این سبک بر اساس نظریه مارکویتز (Markowitz) است و بهترین ترکیب دارایی‌ها با حداکثر بازده نسبت به ریسک را پیدا می‌کند.</li>
+        </ul>
+        اگر در جمله بین نام سبک انگلیسی و کلمات فارسی فاصله بیفتد، نمایش صحیح خواهد بود.
+        </div>
+        """, unsafe_allow_html=True)
 
         # مونت‌کارلو و CVaR
         n_portfolios = 3000
@@ -303,24 +339,44 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         best_cvar_weights = results[5:, best_cvar_idx]
 
         st.subheader("📊 داشبورد خلاصه پرتفو")
+        st.markdown("""
+        <div dir="rtl" style="text-align: right;">
+        <b>در این بخش، بازده و ریسک سالانه، ماهانه و هفتگی پرتفوهای بهینه را مشاهده می‌کنید. این اطلاعات به شما کمک می‌کند تا تصمیم بگیرید کدام سبک مدیریت پرتفو مناسب شماست.</b>
+        </div>
+        """, unsafe_allow_html=True)
         show_periodic_risk_return(resampled_prices, best_weights, "پرتفو بهینه مونت‌کارلو")
         show_periodic_risk_return(resampled_prices, best_cvar_weights, f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)")
 
-        # نمودار دایره‌ای وزن پرتفو بهینه مونت‌کارلو
+        st.markdown("""
+        <div dir="rtl" style="text-align: right;">
+        <b>نمودار دایره‌ای وزن پرتفو:</b>
+        <br>این نمودار، سهم هر دارایی در پرتفو بهینه را به صورت درصدی نمایش می‌دهد.
+        <br>برای پرتفو مونت‌کارلو:
+        </div>
+        """, unsafe_allow_html=True)
         fig_pie = go.Figure(data=[
             go.Pie(labels=asset_names, values=best_weights * 100, hole=.5, textinfo='label+percent')
         ])
-        fig_pie.update_layout(title="توزیع وزنی پرتفو بهینه (مونت‌کارلو)")
+        fig_pie.update_layout(title="توزیع وزنی پرتفو بهینه (Monte Carlo)")
         st.plotly_chart(fig_pie, use_container_width=True)
 
-        # نمودار دایره‌ای وزن پرتفو بهینه CVaR
+        st.markdown("""
+        <div dir="rtl" style="text-align: right;">
+        <b>برای پرتفو بهینه CVaR:</b>
+        </div>
+        """, unsafe_allow_html=True)
         fig_pie_cvar = go.Figure(data=[
             go.Pie(labels=asset_names, values=best_cvar_weights * 100, hole=.5, textinfo='label+percent')
         ])
         fig_pie_cvar.update_layout(title=f"توزیع وزنی پرتفو بهینه بر اساس CVaR ({int(cvar_alpha*100)}%)")
         st.plotly_chart(fig_pie_cvar, use_container_width=True)
 
-        # نمودار مونت‌کارلو (ریسک-بازده)
+        st.markdown("""
+        <div dir="rtl" style="text-align: right;">
+        <b>نمودار ریسک-بازده پرتفوها (Monte Carlo):</b>
+        <br>در این نمودار، هر نقطه یک پرتفو تصادفی است و محور افقی ریسک و محور عمودی بازده را نشان می‌دهد. رنگ نقاط نسبت شارپ (Sharpe Ratio) است.
+        </div>
+        """, unsafe_allow_html=True)
         fig_mc = go.Figure()
         fig_mc.add_trace(
             go.Scatter(
@@ -344,10 +400,15 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             textposition="top right",
             name='پرتفوی بهینه'
         ))
-        fig_mc.update_layout(title="نمودار ریسک-بازده پرتفوهای مونت‌کارلو", xaxis_title="ریسک (%)", yaxis_title="بازده (%)")
+        fig_mc.update_layout(title="نمودار ریسک-بازده پرتفوهای Monte Carlo", xaxis_title="ریسک (%)", yaxis_title="بازده (%)")
         st.plotly_chart(fig_mc, use_container_width=True)
 
-        # نمودار CVaR (ریسک-بازده با رنگ CVaR)
+        st.markdown("""
+        <div dir="rtl" style="text-align: right;">
+        <b>نمودار ریسک-بازده پرتفوها با رنگ CVaR:</b>
+        <br>در این نمودار، رنگ نقاط بر اساس میزان ریسک بحران (CVaR) است. هرچه رنگ تیره‌تر، ریسک بحران بیشتر!
+        </div>
+        """, unsafe_allow_html=True)
         fig_cvar = go.Figure()
         fig_cvar.add_trace(
             go.Scatter(
@@ -375,6 +436,12 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         st.plotly_chart(fig_cvar, use_container_width=True)
 
         # مرز کارا
+        st.markdown("""
+        <div dir="rtl" style="text-align: right;">
+        <b>مرز کارا (Efficient Frontier):</b>
+        <br>این نمودار، بهترین حالت‌های ترکیب ریسک و بازده را بر اساس نظریه مارکویتز نشان می‌دهد.
+        </div>
+        """, unsafe_allow_html=True)
         ef_results, ef_weights = efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200)
         max_sharpe_idx = np.argmax(ef_results[2])
         mpt_weights = ef_weights[max_sharpe_idx]
@@ -393,6 +460,11 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         st.plotly_chart(fig_ef, use_container_width=True)
 
         st.subheader("🔻 بیشینه افت سرمایه (Max Drawdown) پرتفو")
+        st.markdown("""
+        <div dir="rtl" style="text-align: right;">
+        <b>در این بخش، بیشترین افت قیمت پرتفو (Max Drawdown) برای انواع پرتفوها نمایش داده شده است. این معیار، حساسیت پرتفو به ریزش‌های شدید مارکت را نشان می‌دهد.</b>
+        </div>
+        """, unsafe_allow_html=True)
         for label, w in [
             ("پرتفو بهینه مونت‌کارلو", best_weights),
             (f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)", best_cvar_weights),
@@ -403,6 +475,11 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             st.markdown(f"**{label}:** {max_dd:.2%}")
 
         st.subheader("📉 بیمه دارایی‌ها (Married Put)")
+        st.markdown("""
+        <div dir="rtl" style="text-align: right;">
+        <b>در این نمودارها، سود و زیان پرتفوی بیمه‌شده و بیمه‌نشده برای هر دارایی نمایش داده می‌شود. خطوط نقطه‌چین، ترکیب سود دارایی و سود بیمه را نشان می‌دهد.</b>
+        </div>
+        """, unsafe_allow_html=True)
         for name in st.session_state["insured_assets"]:
             info = st.session_state["insured_assets"][name]
             x = np.linspace(info['spot'] * 0.5, info['spot'] * 1.5, 200)
@@ -422,10 +499,15 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             fig2.add_trace(go.Scatter(
                 x=x, y=put_pnl, mode='lines', name='پوت', line=dict(dash='dot', color='blue')
             ))
-            st.markdown(f"**{name}**")
+            st.markdown(f"<b>{name}</b>", unsafe_allow_html=True)
             st.plotly_chart(fig2, use_container_width=True)
 
         st.subheader("🔮 پیش‌بینی قیمت و بازده آتی هر دارایی")
+        st.markdown("""
+        <div dir="rtl" style="text-align: right;">
+        <b>این بخش با شبیه‌سازی تصادفی، قیمت احتمالی آینده هر دارایی را نمایش می‌دهد. هیستوگرام نشان‌دهنده توزیع قیمت‌های شبیه‌سازی‌شده است.</b>
+        </div>
+        """, unsafe_allow_html=True)
         future_months = 6 if period == 'شش‌ماهه' else (3 if period == 'سه‌ماهه' else 1)
         for i, name in enumerate(asset_names):
             last_price = resampled_prices[name].iloc[-1]
