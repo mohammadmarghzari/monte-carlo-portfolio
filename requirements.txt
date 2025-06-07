@@ -11,3 +11,4 @@ xlsxwriter
 openpyxl
 lightgbm
 xgboost
+statsmodels
