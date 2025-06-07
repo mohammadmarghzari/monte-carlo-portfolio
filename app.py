@@ -9,46 +9,22 @@ import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings("ignore")
 
-st.set_page_config(page_title="Portfolio360 - تحلیل پرتفو و پیش‌بینی", layout="wide")
+st.set_page_config(page_title="تحلیل پرتفو و پیش‌بینی", layout="wide")
 st.title("📊 Portfolio360 - ابزار تحلیل پرتفو و پیش‌بینی قیمت")
 
-# ----------- سایدبار تنظیمات -------------
-st.sidebar.header("🔧 تنظیمات تحلیل")
-
-# تاریخ شروع و پایان
-date_start = st.sidebar.date_input("تاریخ شروع تحلیل", value=datetime(2022, 1, 1))
-date_end = st.sidebar.date_input("تاریخ پایان تحلیل", value=datetime.today())
-if date_end < date_start:
-    st.sidebar.error("تاریخ پایان باید بعد از تاریخ شروع باشد.")
-
-# تعداد پرتفوهای شبیه‌سازی
-n_portfolios = st.sidebar.slider("تعداد پرتفوهای شبیه‌سازی", 1000, 20000, 5000, 1000)
-
-# پارامترهای ریسک پرتفو
-st.sidebar.markdown("---")
-st.sidebar.subheader("محدوده ریسک پرتفو")
-min_risk = st.sidebar.selectbox("حداقل ریسک پرتفو (%)", [i for i in range(0, 100, 10)], index=1)
-max_risk = st.sidebar.selectbox("حداکثر ریسک پرتفو (%)", [i for i in range(10, 110, 10)], index=9)
-st.sidebar.markdown(
-    "<small>این فیلدها محدوده ریسک پرتفوها را روی مرز کارا تعیین می‌کنند و فقط سبدهایی با ریسک در این بازه نمایش داده می‌شوند.</small>",
-    unsafe_allow_html=True
-)
+# فقط پارامترهای ضروری باقی می‌ماند
 
 # پارامترهای ویژه هر سبک
 st.sidebar.markdown("---")
-st.sidebar.subheader("پارامترهای روش‌ها")
-target_return = st.sidebar.number_input("بازده هدف برای سورتینو و امگا (%)", value=5.0, min_value=0.0, max_value=100.0, step=0.1) / 100
+st.sidebar.subheader("پارامترهای سبک‌های تخصصی")
 cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR/VaR", 0.80, 0.99, 0.95, 0.01)
 
-# بارگذاری داده‌ها
-st.sidebar.markdown("---")
 uploaded_files = st.sidebar.file_uploader(
-    "آپلود فایل CSV قیمت دارایی‌ها (ستون تاریخ و قیمت - هر نام متداول برای قیمت پایانی)", 
+    "آپلود فایل CSV دارایی‌ها (ستون Date و ستون قیمت)", 
     type=['csv'], 
     accept_multiple_files=True
 )
 
-# پردازش فایل‌ها
 prices_df = pd.DataFrame()
 asset_names = []
 weight_settings = {}
@@ -71,13 +47,13 @@ if uploaded_files:
                 break
         if price_col is None:
             st.error(
-                f"فایل {file.name} هیچ‌کدام از ستون‌های متداول قیمت پایانی را ندارد!"
-                f"\nستون‌های فعلی فایل: {list(df.columns)}"
-                f"\nستون‌های مورد انتظار: {price_columns_possible}"
+                f"فایل {file.name} هیچ‌کدام از ستون‌های متداول قیمت را ندارد!"
+                f"\nستون‌ها: {list(df.columns)}"
+                f"\nانتظار: {price_columns_possible}"
             )
             continue
         if "Date" not in df.columns:
-            st.error(f"فایل {file.name} باید دارای ستون تاریخ (Date) باشد! ستون‌های فعلی: {list(df.columns)}")
+            st.error(f"فایل {file.name} باید ستون Date داشته باشد! ستون‌ها: {list(df.columns)}")
             continue
         df = df[["Date", price_col]].rename(columns={price_col: name})
         df["Date"] = pd.to_datetime(df["Date"])
@@ -91,21 +67,12 @@ if uploaded_files:
         df[name] = pd.to_numeric(df[name], errors='coerce')
         df = df.dropna(subset=[name, "Date"])
         df = df.set_index("Date")
-        df = df[(df.index >= pd.to_datetime(date_start)) & (df.index <= pd.to_datetime(date_end))]
         prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
         asset_names.append(name)
     prices_df.dropna(inplace=True)
 
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("محدودیت وزن هر دارایی (٪)")
-    for name in asset_names:
-        min_w = st.sidebar.number_input(f"حداقل وزن {name}", 0.0, 100.0, 0.0, 1.0, key=f"min_{name}") / 100
-        max_w = st.sidebar.number_input(f"حداکثر وزن {name}", 0.0, 100.0, 100.0, 1.0, key=f"max_{name}") / 100
-        weight_settings[name] = {'min': min_w, 'max': max_w}
-
-# تحلیل پرتفو و نمایش نتایج
 if not prices_df.empty:
-    st.markdown("### 📈 داده‌های قیمت پایانی تعدیل‌شده دارایی‌ها")
+    st.markdown("### 📈 داده‌های قیمت پایانی دارایی‌ها")
     st.dataframe(prices_df.tail())
 
     freq = pd.infer_freq(prices_df.index)
@@ -125,8 +92,13 @@ if not prices_df.empty:
     def portfolio_risk(weights):
         return np.sqrt(np.dot(weights.T, np.dot(cov, weights)))
 
-    min_risk_user = min_risk / 100
-    max_risk_user = max_risk / 100
+    # فقط بهینه‌سازی ساده برای مثال: بیشترین شارپ
+    n_portfolios = 5000  # مقدار ثابت (قابل تغییر در کد)
+    min_risk_user = 0.1
+    max_risk_user = 1.0
+    # محدودیت وزن آزاد (۰ تا ۱)
+    for name in asset_names:
+        weight_settings[name] = {'min': 0.0, 'max': 1.0}
 
     styles = [
         ("Sharpe", "پرتفو با بیشترین نسبت شارپ."),
@@ -155,6 +127,7 @@ if not prices_df.empty:
             port_ret = portfolio_return(w)
             port_risk = portfolio_risk(w)
             port_sorted = np.dot(returns.values, w)
+            target_return = 0.05  # مقدار ثابت (۵ درصد)
             downside = port_sorted[port_sorted < target_return]
             sortino = (port_ret - target_return) / (np.std(downside) + 1e-8) if len(downside) > 0 else 0
             omega = np.sum(port_sorted > target_return) / (np.abs(np.sum(port_sorted < target_return)) + 1e-8)
@@ -173,12 +146,9 @@ if not prices_df.empty:
         df_res = df_res[(df_res["risk"] >= min_risk_user) & (df_res["risk"] <= max_risk_user)]
         if df_res.empty:
             st.warning(
-                f"در سبک {style} هیچ سبدی در محدوده ریسک انتخابی پیدا نشد! "
+                f"در سبک {style} هیچ سبدی در محدوده ریسک پیدا نشد! "
                 "\n\n"
-                "- بازه ریسک را بزرگ‌تر انتخاب کنید.\n"
-                "- تعداد پرتفوهای شبیه‌سازی را افزایش دهید.\n"
-                "- محدودیت وزن دارایی‌ها را آزادتر کنید.\n"
-                "- داده‌های قیمتی یا نوسان دارایی‌ها را بررسی کنید.\n"
+                "- بازه ریسک یا پارامترهای کد را تغییر دهید.\n"
             )
             continue
         if style == "Sharpe":
@@ -207,8 +177,6 @@ if not prices_df.empty:
             all_best.append((style, best, best_desc))
         st.markdown(f"---\n### {style} : {best_desc}")
         st.markdown(f"**{style_desc}**")
-        if style in ["Sortino", "Omega"]:
-            st.info(f"بازده هدف: {target_return*100:.2f}%")
         if style in ["CVaR", "VaR"]:
             st.info(f"سطح اطمینان: {int(cvar_alpha*100)}٪")
         # نمودار کارا فقط انگلیسی و حرفه‌ای
@@ -241,7 +209,7 @@ if not prices_df.empty:
         """)
         st.info(
             f"راهنمای استفاده از سبک {style}: {style_desc}\n"
-            "در صورت مشاهده خطا، بازه ریسک، محدودیت وزن یا تعداد پرتفوها را تغییر دهید."
+            "در صورت مشاهده خطا، بازه ریسک یا پارامترهای کد را تغییر دهید."
         )
 
     # پیش‌بینی قیمت انگلیسی و حرفه‌ای
@@ -287,9 +255,9 @@ if not prices_df.empty:
     st.markdown("""
     <div dir="rtl" style="text-align:right;">
     <b>راهنما:</b><br>
-    - همه سبک‌های پرتفو همزمان محاسبه و مقایسه می‌شوند.<br>
-    - برای هر سبک، مرز کارا فقط انگلیسی، خروجی و سبد بهینه و توضیحات فارسی نمایش داده می‌شود.<br>
-    - پیش‌بینی قیمت برای هر دارایی به صورت حرفه‌ای و انگلیسی است.<br>
+    - همه سبک‌های پرتفو مقایسه می‌شوند.<br>
+    - نمودارها انگلیسی و حرفه‌ای است.<br>
+    - بقیه ابزار کاملاً فارسی است.<br>
     </div>
     """, unsafe_allow_html=True)
 else:
