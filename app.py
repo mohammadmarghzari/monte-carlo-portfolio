@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import yfinance as yf
 import base64
 
-# --- بخش ۱: ذخیره داده‌های بارگذاری‌شده و بیمه در session_state
+# --- 1. ذخیره داده‌های بارگذاری‌شده و بیمه در session_state
 if "downloaded_dfs" not in st.session_state:
     st.session_state["downloaded_dfs"] = []
 if "uploaded_dfs" not in st.session_state:
@@ -458,28 +458,72 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         max_dd = calculate_max_drawdown(pf_prices)
         st.markdown(f"**{label}:** {max_dd:.2%}")
 
-    st.subheader("📉 بیمه دارایی‌ها (Married Put)")
+    st.subheader("📉 بیمه دارایی‌ها (Married Put) با نقطه سر به سر و درصد سود/زیان")
     for name in st.session_state["insured_assets"]:
         info = st.session_state["insured_assets"][name]
-        x = np.linspace(info['spot'] * 0.5, info['spot'] * 1.5, 200)
-        asset_pnl = (x - info['spot']) * info['base']
-        put_pnl = np.where(x < info['strike'], (info['strike'] - x) * info['amount'], 0) - info['premium'] * info['amount']
+        spot = info['spot']
+        strike = info['strike']
+        premium = info['premium']
+        amount = info['amount']
+        base = info['base']
+
+        x = np.linspace(spot * 0.5, spot * 1.5, 201)
+        asset_pnl = (x - spot) * base
+        put_pnl = np.where(x < strike, (strike - x) * amount, 0) - premium * amount
         total_pnl = asset_pnl + put_pnl
+        percent_pnl = total_pnl / (spot * base) * 100
+
+        cross_idx = np.where(np.diff(np.sign(total_pnl)) != 0)[0]
+        if len(cross_idx) > 0:
+            break_even_idx = cross_idx[0] + 1
+        else:
+            break_even_idx = np.abs(total_pnl).argmin()
+        break_even_price = x[break_even_idx]
+        break_even_percent = percent_pnl[break_even_idx]
+        colors = np.where(total_pnl >= 0, 'green', 'red')
+
         fig2 = go.Figure()
+        fig2.add_trace(go.Bar(
+            x=x,
+            y=total_pnl,
+            marker_color=colors,
+            hovertemplate=
+                'قیمت دارایی: %{x:,.0f}<br>' +
+                'سود/زیان کل: %{y:,.0f}<br>' +
+                'درصد سود/زیان: %{customdata:.2f}%',
+            customdata=percent_pnl,
+            name='سود/زیان کل'
+        ))
+        fig2.add_vline(
+            x=break_even_price,
+            line_dash="dot",
+            line_color="blue",
+            annotation_text=f"Break-even: {break_even_price:,.0f}",
+            annotation_position="top left"
+        )
         fig2.add_trace(go.Scatter(
-            x=x[total_pnl>=0], y=total_pnl[total_pnl>=0], mode='lines', name='سود', line=dict(color='green', width=3)
+            x=x, y=asset_pnl,
+            mode='lines', name='دارایی پایه', line=dict(dash='dot', color='gray')
         ))
         fig2.add_trace(go.Scatter(
-            x=x[total_pnl<0], y=total_pnl[total_pnl<0], mode='lines', name='زیان', line=dict(color='red', width=3)
+            x=x, y=put_pnl,
+            mode='lines', name='پوت', line=dict(dash='dot', color='blue')
         ))
-        fig2.add_trace(go.Scatter(
-            x=x, y=asset_pnl, mode='lines', name='دارایی پایه', line=dict(dash='dot', color='gray')
-        ))
-        fig2.add_trace(go.Scatter(
-            x=x, y=put_pnl, mode='lines', name='پوت', line=dict(dash='dot', color='blue')
-        ))
+
+        fig2.update_layout(
+            title=f"Married Put {name} - نقطه سر به سر و درصد سود/زیان",
+            xaxis_title="قیمت دارایی",
+            yaxis_title="سود/زیان",
+            hovermode="x unified"
+        )
         st.markdown(f"<b>{name}</b>", unsafe_allow_html=True)
         st.plotly_chart(fig2, use_container_width=True)
+        st.markdown(f"""
+        <div dir="rtl" style="text-align: right;">
+        <b>نقطه سر به سر (Break-even):</b> قیمتی است که سود و زیان کل شما دقیقاً صفر می‌شود (نشان داده شده با خط آبی نقطه‌چین).<br>
+        با حرکت نشانگر روی هر میله، درصد سود یا زیان نسبت به سرمایه اولیه هم نمایش داده می‌شود.
+        </div>
+        """, unsafe_allow_html=True)
 
     st.subheader("🔮 پیش‌بینی قیمت و بازده آتی هر دارایی")
     future_months = 6 if period == 'شش‌ماهه' else (3 if period == 'سه‌ماهه' else 1)
