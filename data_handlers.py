@@ -1,5 +1,77 @@
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import yfinance as yf
+
+def get_dataframes(st):
+    if "downloaded_dfs" not in st.session_state:
+        st.session_state["downloaded_dfs"] = []
+    if "uploaded_dfs" not in st.session_state:
+        st.session_state["uploaded_dfs"] = []
+    if "investment_amount" not in st.session_state:
+        st.session_state["investment_amount"] = 1000.0
+
+    # سایدبار برای بارگذاری فایل
+    st.sidebar.header("بارگذاری دارایی‌ها")
+    uploaded_files = st.sidebar.file_uploader(
+        "فایل CSV دارایی‌ها", type=['csv'], accept_multiple_files=True, key="uploader"
+    )
+    # سایدبار برای دانلود از یاهو
+    with st.sidebar.expander("Yahoo Finance"):
+        tickers_input = st.text_input("نمادها (با کاما)")
+        start = st.date_input("تاریخ شروع", value=pd.to_datetime("2023-01-01"))
+        end = st.date_input("تاریخ پایان", value=pd.to_datetime("today"))
+        download_btn = st.button("دریافت داده آنلاین")
+    if download_btn and tickers_input.strip():
+        tickers = [t.strip() for t in tickers_input.strip().split(",") if t.strip()]
+        try:
+            data = yf.download(tickers, start=start, end=end, progress=False, group_by='ticker', auto_adjust=True)
+            if data.empty:
+                st.error("داده‌ای دریافت نشد!")
+            else:
+                new_downloaded = []
+                for t in tickers:
+                    df, err = get_price_dataframe_from_yf(data, t)
+                    if df is not None:
+                        df['Date'] = pd.to_datetime(df['Date'])
+                        new_downloaded.append((t, df))
+                        st.success(f"داده {t} با موفقیت دانلود شد.")
+                    else:
+                        st.error(f"{err}")
+                st.session_state["downloaded_dfs"].extend(new_downloaded)
+        except Exception as ex:
+            st.error(f"خطا در دریافت داده: {ex}")
+
+    if uploaded_files:
+        for file in uploaded_files:
+            if not hasattr(file, "uploaded_in_session") or not file.uploaded_in_session:
+                df = read_csv_file(file)
+                if df is not None:
+                    st.session_state["uploaded_dfs"].append((file.name.split('.')[0], df))
+                file.uploaded_in_session = True
+
+    prices_df = pd.DataFrame()
+    asset_names = []
+    for t, df in st.session_state["downloaded_dfs"]:
+        name = t
+        if "Date" not in df.columns or "Price" not in df.columns:
+            continue
+        df = df.dropna(subset=['Date', 'Price'])
+        df = df[['Date', 'Price']].set_index('Date')
+        df.columns = [name]
+        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
+        asset_names.append(name)
+    for t, df in st.session_state["uploaded_dfs"]:
+        name = t
+        if "Date" not in df.columns or "Price" not in df.columns:
+            continue
+        df = df.dropna(subset=['Date', 'Price'])
+        df = df[['Date', 'Price']].set_index('Date')
+        df.columns = [name]
+        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
+        asset_names.append(name)
+    if prices_df.empty or len(asset_names) < 1:
+        return None, []
+    return prices_df, asset_names
 
 def read_csv_file(file):
     try:
@@ -22,6 +94,7 @@ def read_csv_file(file):
             header_row = df.iloc[header_idx].tolist()
             df = df.iloc[header_idx+1:].reset_index(drop=True)
             df.columns = header_row
+
         date_col = [c for c in df.columns if str(c).strip().lower() == 'date']
         if not date_col:
             raise Exception("ستون تاریخ با نام 'Date' یا مشابه آن یافت نشد.")
@@ -35,6 +108,7 @@ def read_csv_file(file):
         df = df[[date_col, price_col]].dropna()
         if df.empty:
             raise Exception("پس از حذف داده‌های خالی، داده‌ای باقی نماند.")
+
         df = df.rename(columns={date_col: "Date", price_col: "Price"})
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
