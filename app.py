@@ -5,9 +5,7 @@ import plotly.graph_objects as go
 import yfinance as yf
 import base64
 
-# =========================
-# 1. ذخیره داده‌های دانلودی/آپلودی و بیمه در session_state
-# =========================
+# --- Session state ---
 if "downloaded_dfs" not in st.session_state:
     st.session_state["downloaded_dfs"] = []
 if "uploaded_dfs" not in st.session_state:
@@ -15,9 +13,7 @@ if "uploaded_dfs" not in st.session_state:
 if "insured_assets" not in st.session_state:
     st.session_state["insured_assets"] = {}
 
-# =========================
-# 2. تابع خواندن فایل csv و استخراج price/date
-# =========================
+# --- CSV Reader ---
 def read_csv_file(file):
     try:
         file.seek(0)
@@ -39,7 +35,6 @@ def read_csv_file(file):
             header_row = df.iloc[header_idx].tolist()
             df = df.iloc[header_idx+1:].reset_index(drop=True)
             df.columns = header_row
-
         date_col = [c for c in df.columns if str(c).strip().lower() == 'date']
         if not date_col:
             raise Exception("ستون تاریخ با نام 'Date' یا مشابه آن یافت نشد.")
@@ -53,7 +48,6 @@ def read_csv_file(file):
         df = df[[date_col, price_col]].dropna()
         if df.empty:
             raise Exception("پس از حذف داده‌های خالی، داده‌ای باقی نماند.")
-
         df = df.rename(columns={date_col: "Date", price_col: "Price"})
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
@@ -65,17 +59,13 @@ def read_csv_file(file):
         st.error(f"خطا در خواندن فایل {file.name}: {e}")
         return None
 
-# =========================
-# 3. لینک دانلود دیتافریم به csv
-# =========================
+# --- Download Link ---
 def download_link(df, filename):
     csv = df.reset_index(drop=True).to_csv(index=False).encode()
     b64 = base64.b64encode(csv).decode()
     return f'<a href="data:file/csv;base64,{b64}" download="{filename}">⬇️ دریافت فایل CSV</a>'
 
-# =========================
-# 4. تبدیل داده یاهو به فرمت price/date
-# =========================
+# --- Yahoo Finance DataFrame Extractor ---
 def get_price_dataframe_from_yf(data, t):
     if isinstance(data.columns, pd.MultiIndex):
         if t in data.columns.levels[0]:
@@ -104,18 +94,13 @@ def get_price_dataframe_from_yf(data, t):
         df = data[['Date', price_col]].rename(columns={price_col: 'Price'})
         return df, None
 
-# =========================
-# 5. محاسبه Max Drawdown پرتفوی
-# =========================
+# --- Max Drawdown ---
 def calculate_max_drawdown(prices: pd.Series) -> float:
     roll_max = prices.cummax()
     drawdown = (prices - roll_max) / roll_max
-    max_dd = drawdown.min()
-    return max_dd
+    return drawdown.min()
 
-# =========================
-# 6. محاسبه مرز کارا (Efficient Frontier) مارکویتز
-# =========================
+# --- Efficient Frontier ---
 def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200):
     num_assets = len(mean_returns)
     results = np.zeros((3, points))
@@ -130,9 +115,7 @@ def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200):
         weight_record.append(weights)
     return results, np.array(weight_record)
 
-# =========================
-# 7. نمایش بازده و ریسک پرتفوی در بازه های مختلف
-# =========================
+# --- Periodic Risk/Return ---
 def show_periodic_risk_return(resampled_prices, weights, label):
     pf_prices = (resampled_prices * weights).sum(axis=1)
     pf_returns = pf_prices.pct_change().dropna()
@@ -155,23 +138,19 @@ def show_periodic_risk_return(resampled_prices, weights, label):
     </div>
     """, unsafe_allow_html=True)
 
-# =========================
+# --- توضیحات ---
 st.markdown("""
 <div dir="rtl" style="text-align: right;">
 <h3>ابزار تحلیل پرتفو: توضیحات کلی</h3>
-این ابزار برای تحلیل و بهینه‌سازی ترکیب دارایی‌های یک پرتفو (Portfolio) طراحی شده است...
+ابزاری برای تحلیل و بهینه‌سازی پرتفو به روش‌های مدرن و کلاسیک!
 </div>
 """, unsafe_allow_html=True)
 
-# =========================
-# 9. بارگذاری و حذف دارایی‌های دانلودی و آپلودی
-# =========================
+# --- بارگذاری/حذف دارایی‌ها ---
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV آپلود کنید (هر دارایی یک فایل)", type=['csv'], accept_multiple_files=True, key="uploader"
 )
-
-# حذف دارایی دانلودی از لیست
 if st.session_state["downloaded_dfs"]:
     st.sidebar.markdown("<b>حذف دارایی‌های دانلود شده:</b>", unsafe_allow_html=True)
     for idx, (t, df) in enumerate(st.session_state["downloaded_dfs"]):
@@ -182,8 +161,6 @@ if st.session_state["downloaded_dfs"]:
             if st.button("❌", key=f"delete_dl_{t}_{idx}"):
                 st.session_state["downloaded_dfs"].pop(idx)
                 st.experimental_rerun()
-
-# حذف دارایی آپلودی از لیست
 if st.session_state["uploaded_dfs"]:
     st.sidebar.markdown("<b>حذف دارایی‌های آپلود شده:</b>", unsafe_allow_html=True)
     for idx, (t, df) in enumerate(st.session_state["uploaded_dfs"]):
@@ -195,25 +172,19 @@ if st.session_state["uploaded_dfs"]:
                 st.session_state["uploaded_dfs"].pop(idx)
                 st.experimental_rerun()
 
-# =========================
-# 10. انتخاب پارامترها (بازه، ریسک، CVaR و ...)
-# =========================
+# --- پارامترها ---
 period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
 resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'شش‌ماهه': '2Q'}[period]
 annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}[period]
 user_risk = st.sidebar.slider("ریسک هدف پرتفو (انحراف معیار سالانه)", 0.01, 1.0, 0.25, 0.01)
 cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
 
-# =========================
-# 11. دانلود داده آنلاین یاهو و اضافه به session_state
-# =========================
+# --- دانلود داده یاهو ---
 with st.sidebar.expander("📥 دانلود داده آنلاین از Yahoo Finance"):
     st.markdown("""
     <div dir="rtl" style="text-align: right;">
     <b>راهنما:</b>
     <br>نمادها را با کاما و بدون فاصله وارد کنید (مثال: <span style="direction:ltr;display:inline-block">BTC-USD,AAPL,ETH-USD</span>)
-    <br>برای بیت‌کوین: <span style="direction:ltr;display:inline-block">BTC-USD</span>
-    <br>برای اپل: <span style="direction:ltr;display:inline-block">AAPL</span>
     </div>
     """, unsafe_allow_html=True)
     tickers_input = st.text_input("نماد دارایی‌ها (با کاما و بدون فاصله)")
@@ -242,9 +213,7 @@ if download_btn and tickers_input.strip():
     except Exception as ex:
         st.error(f"خطا در دریافت داده: {ex}")
 
-# =========================
-# 12. آپلود فایل csv و افزودن به لیست دارایی‌ها
-# =========================
+# --- آپلود فایل csv و افزودن به لیست دارایی‌ها ---
 if uploaded_files:
     for file in uploaded_files:
         if not hasattr(file, "uploaded_in_session") or not file.uploaded_in_session:
@@ -253,19 +222,14 @@ if uploaded_files:
                 st.session_state["uploaded_dfs"].append((file.name.split('.')[0], df))
             file.uploaded_in_session = True
 
-# =========================
-# 13. بیمه برای هر دارایی (Married Put)
-# =========================
+# --- بیمه برای هر دارایی (Married Put) ---
 all_asset_names = [t for t, _ in st.session_state["downloaded_dfs"]] + [t for t, _ in st.session_state["uploaded_dfs"]]
 for name in all_asset_names:
     with st.sidebar.expander(f"⚙️ بیمه برای {name}", expanded=False):
         st.markdown("""
         <div dir="rtl" style="text-align: right;">
         <b>Married Put چیست؟</b>
-        <br>بیمه در پرتفو (Married Put) یعنی شما همزمان با نگهداری دارایی، یک قرارداد اختیار فروش (Put Option) برای همان دارایی می‌خرید.
-        <br><b>اگر بیمه نگیرید:</b> در صورت ریزش شدید قیمت، کل ضرر را متحمل می‌شوید و هیچ پوششی ندارید.
-        <br><b>اگر بیمه بگیرید:</b> حتی اگر قیمت دارایی خیلی پایین بیاید، بخش اعظم ضرر شما تا حد strike price جبران می‌شود.
-        <br><b>مثال:</b> فرض کنید بیت‌کوین دارید و Put با قیمت اعمال ۵۰,۰۰۰ دلار خریده‌اید. اگر قیمت بیت‌کوین به ۳۰,۰۰۰ برسد، شما فقط تا حد ۵۰,۰۰۰ ضرر می‌کنید و پایین‌تر بیمه شده اید.
+        <br>بیمه در پرتفو یعنی خرید همزمان دارایی و یک قرارداد اختیار فروش. اگر بیمه بگیرید، ضرر شما محدود می‌شود.
         </div>
         """, unsafe_allow_html=True)
         insured = st.checkbox(f"فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
@@ -287,9 +251,7 @@ for name in all_asset_names:
         else:
             st.session_state["insured_assets"].pop(name, None)
 
-# =========================
-# 14. تحلیل پرتفوی، محاسبه، نمودارها و توضیحات هر بخش
-# =========================
+# --- تحلیل پرتفو ---
 if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     prices_df = pd.DataFrame()
     asset_names = []
@@ -313,19 +275,13 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         asset_names.append(name)
 
     st.subheader("📉 روند قیمت دارایی‌ها")
-    st.markdown("""
-    <div dir="rtl" style="text-align: right;">
-    این نمودار، روند تاریخی قیمت هر دارایی (asset) را در بازه انتخابی نمایش می‌دهد. این به شما کمک می‌کند نوسانات و ریسک دارایی‌ها را بهتر مشاهده کنید.
-    اگر بین اعداد انگلیسی و فارسی یا نماد انگلیسی و فارسی فاصله بیفتد، نمایش داده اصلاح می‌شود.
-    </div>
-    """, unsafe_allow_html=True)
     st.line_chart(prices_df.resample(resample_rule).last().dropna())
 
     if prices_df.empty:
         st.error("❌ داده‌ی معتبری برای تحلیل یافت نشد.")
         st.stop()
 
-    # --- [تعدیل سری قیمتی دارایی‌ها بر اساس بیمه] ---
+    # --- تعدیل قیمت‌ها بر اساس بیمه ---
     for name in asset_names:
         if name in st.session_state["insured_assets"]:
             info = st.session_state["insured_assets"][name]
@@ -341,11 +297,109 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         cov_matrix = returns.cov() * annual_factor
         std_devs = np.sqrt(np.diag(cov_matrix))
 
-        # ادامه تحلیل پرتفو، بهینه‌سازی و نمودارها دقیقا مثل کد اصلی پروژه
-        # می‌توانید کد کامل بهینه‌سازی پرتفو، محاسبات Monte Carlo، CVaR و ... را همینجا اضافه کنید
+        # --- بهینه‌سازی پرتفو مونت‌کارلو و CVaR ---
+        n_portfolios = 3000
+        n_mc = 1000
+        results = np.zeros((5 + len(asset_names), n_portfolios))
+        cvar_results = np.zeros((3 + len(asset_names), n_portfolios))
+        np.random.seed(42)
+        rf = 0
+        downside = returns.copy()
+        downside[downside > 0] = 0
+        for i in range(n_portfolios):
+            weights = np.random.random(len(asset_names))
+            weights /= np.sum(weights)
+            port_return = np.dot(weights, mean_returns)
+            port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+            downside_risk = np.sqrt(np.dot(weights.T, np.dot(downside.cov() * annual_factor, weights)))
+            sharpe_ratio = (port_return - rf) / port_std
+            sortino_ratio = (port_return - rf) / downside_risk if downside_risk > 0 else np.nan
+            mc_sims = np.random.multivariate_normal(mean_returns, cov_matrix, n_mc)
+            port_mc_returns = np.dot(mc_sims, weights)
+            VaR = np.percentile(port_mc_returns, (1 - cvar_alpha) * 100)
+            CVaR = port_mc_returns[port_mc_returns <= VaR].mean() if np.any(port_mc_returns <= VaR) else VaR
+            results[0, i] = port_return
+            results[1, i] = port_std
+            results[2, i] = sharpe_ratio
+            results[3, i] = sortino_ratio
+            results[4, i] = -CVaR
+            results[5:, i] = weights
+            cvar_results[0, i] = port_std
+            cvar_results[1, i] = port_return
+            cvar_results[2, i] = -CVaR
+            cvar_results[3:, i] = weights
+
+        best_idx = np.argmin(np.abs(results[1] - user_risk))
+        best_weights = results[5:, best_idx]
+        best_cvar_idx = np.argmin(results[4])
+        best_cvar_weights = results[5:, best_cvar_idx]
+
+        st.subheader("📊 داشبورد خلاصه پرتفو")
+        show_periodic_risk_return(resampled_prices, best_weights, "پرتفو بهینه مونت‌کارلو")
+        show_periodic_risk_return(resampled_prices, best_cvar_weights, f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)")
+
+        # --- نمودارهای Pie ---
+        fig_pie = go.Figure(data=[
+            go.Pie(labels=asset_names, values=best_weights * 100, hole=.5, textinfo='label+percent')
+        ])
+        fig_pie.update_layout(title="توزیع وزنی پرتفو بهینه (Monte Carlo)")
+        st.plotly_chart(fig_pie, use_container_width=True)
+        fig_pie_cvar = go.Figure(data=[
+            go.Pie(labels=asset_names, values=best_cvar_weights * 100, hole=.5, textinfo='label+percent')
+        ])
+        fig_pie_cvar.update_layout(title=f"توزیع وزنی پرتفو بهینه بر اساس CVaR ({int(cvar_alpha*100)}%)")
+        st.plotly_chart(fig_pie_cvar, use_container_width=True)
+
+        # --- نمودار ریسک-بازده ---
+        fig_mc = go.Figure()
+        fig_mc.add_trace(
+            go.Scatter(
+                x=results[1]*100, y=results[0]*100,
+                mode='markers',
+                marker=dict(size=6, color=results[2], colorscale='Viridis', showscale=True, colorbar=dict(title='Sharpe Ratio')),
+                name='پرتفوها'
+            )
+        )
+        fig_mc.add_trace(go.Scatter(
+            x=[results[1,best_idx]*100], y=[results[0,best_idx]*100],
+            mode='markers+text',
+            marker=dict(size=15, color='red'),
+            text=["بهینه"], textposition="top right",
+            name='پرتفوی بهینه'
+        ))
+        fig_mc.update_layout(title="نمودار ریسک-بازده پرتفوهای Monte Carlo", xaxis_title="ریسک (%)", yaxis_title="بازده (%)")
+        st.plotly_chart(fig_mc, use_container_width=True)
+
+        # --- مرز کارا ---
+        ef_results, ef_weights = efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200)
+        max_sharpe_idx = np.argmax(ef_results[2])
+        mpt_weights = ef_weights[max_sharpe_idx]
+        fig_ef = go.Figure()
+        fig_ef.add_trace(go.Scatter(
+            x=ef_results[0]*100, y=ef_results[1]*100,
+            mode='markers', marker=dict(color=ef_results[2], colorscale='Viridis', size=7, showscale=True),
+            name='مرز کارا'
+        ))
+        fig_ef.add_trace(go.Scatter(
+            x=[ef_results[0, max_sharpe_idx]*100], y=[ef_results[1, max_sharpe_idx]*100],
+            mode='markers+text', marker=dict(size=14, color='red', symbol='star'),
+            text=["پرتفوی بهینه MPT"], textposition="top right",
+            name='پرتفوی MPT'
+        ))
+        st.plotly_chart(fig_ef, use_container_width=True)
+
+        # --- Max Drawdown ---
+        st.subheader("🔻 بیشینه افت سرمایه (Max Drawdown) پرتفو")
+        for label, w in [
+            ("پرتفو بهینه مونت‌کارلو", best_weights),
+            (f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)", best_cvar_weights),
+            ("پرتفو بهینه MPT", mpt_weights),
+        ]:
+            pf_prices = (resampled_prices * w).sum(axis=1)
+            max_dd = calculate_max_drawdown(pf_prices)
+            st.markdown(f"**{label}:** {max_dd:.2%}")
 
     except Exception as e:
         st.error(f"خطای تحلیل پرتفو: {e}")
-
 else:
     st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price یا Close یا Open را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
