@@ -3,25 +3,53 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-def run_portfolio_analysis(prices_df, asset_names, ...):
-    # تحلیل پرتفو (مثل کد قبلی)
-    # خروجی: دیکشنری شامل وزن‌های پرتفوهای مختلف (مونت‌کارلو، CVaR، MPT و ...)
-    # و نتایج مرز کارا. فرض کنید این خروجی را analysis می‌نامیم:
-    # {
-    #   "best_weights": ...,
-    #   "best_cvar_weights": ...,
-    #   "mpt_weights": ...,
-    #   "ef_results": (stds, returns, sharpe, weights_list),
-    #   ...
-    # }
-    # این تابع را طبق نیاز کامل کن (یا کد قبلی را اینجا قرار بده).
-    return analysis
+def run_portfolio_analysis(prices_df, asset_names, investment_amount):
+    # پارامترهای ساده‌شده
+    resample_rule = "M"
+    annual_factor = 12
+
+    resampled_prices = prices_df.resample(resample_rule).last().dropna()
+    returns = resampled_prices.pct_change().dropna()
+    mean_returns = np.atleast_1d(np.array(returns.mean() * annual_factor))
+    cov_matrix = np.atleast_2d(np.array(returns.cov() * annual_factor))
+    std_devs = np.atleast_1d(np.sqrt(np.diag(cov_matrix)))
+
+    n_portfolios = 1000
+    results = np.zeros((3 + len(asset_names), n_portfolios))
+    np.random.seed(42)
+    for i in range(n_portfolios):
+        weights = np.random.random(len(asset_names))
+        weights /= np.sum(weights)
+        port_return = np.dot(weights, mean_returns)
+        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        sharpe_ratio = port_return / port_std if port_std > 0 else 0
+        results[0, i] = port_return
+        results[1, i] = port_std
+        results[2, i] = sharpe_ratio
+        results[3:, i] = weights
+
+    # سبک‌های مختلف: مونت‌کارلو، CVaR، MPT
+    best_idx = np.argmax(results[2])  # بیشینه شارپ (MPT)
+    best_weights = results[3:, np.random.randint(0, n_portfolios)]  # مونت‌کارلو رندوم
+    best_cvar_weights = results[3:, np.argmin(results[1])]  # کمترین ریسک (نمونه‌ای برای CVaR)
+
+    mpt_weights = results[3:, best_idx]
+    ef_results = (results[1], results[0], results[2])
+
+    return {
+        "best_weights": best_weights,
+        "best_cvar_weights": best_cvar_weights,
+        "mpt_weights": mpt_weights,
+        "ef_results": ef_results,
+        "cov_matrix": cov_matrix,
+        "mean_returns": mean_returns
+    }
 
 def plot_pie_charts(analysis, asset_names, investment_amount):
     styles = [
-        ("پرتفو بهینه مونت‌کارلو", analysis["best_weights"]),
-        ("پرتفو بهینه CVaR", analysis["best_cvar_weights"]),
-        ("پرتفو بهینه MPT", analysis["mpt_weights"]),
+        ("پرتفو مونت‌کارلو", analysis["best_weights"]),
+        ("پرتفو CVaR", analysis["best_cvar_weights"]),
+        ("پرتفو MPT", analysis["mpt_weights"]),
     ]
     cols = st.columns(len(styles))
     for i, (label, weights) in enumerate(styles):
@@ -31,7 +59,6 @@ def plot_pie_charts(analysis, asset_names, investment_amount):
             )
             st.plotly_chart(pie_fig, use_container_width=True)
             st.markdown(f"<b>{label}</b>", unsafe_allow_html=True)
-            # نمایش مقادیر دلاری/درصدی هر دارایی
             for asset, w in zip(asset_names, weights):
                 st.markdown(f"{asset}: {w*100:.2f}% ({investment_amount*w:.2f} $)")
 
@@ -42,7 +69,7 @@ def plot_efficient_frontiers(analysis, asset_names):
     fig.add_trace(go.Scatter(
         x=stds, y=rets, mode='markers',
         marker=dict(color=sharpes, colorscale='Viridis', showscale=True),
-        name='مرز کارا پرتفوها'
+        name='مرز کارا'
     ))
     # مارکر پرتفوهای منتخب
     for label, weights in [
@@ -60,7 +87,7 @@ def plot_efficient_frontiers(analysis, asset_names):
     fig.update_layout(
         xaxis_title="ریسک سالانه (انحراف معیار)",
         yaxis_title="بازده سالانه",
-        title="Efficient Frontier (مرز کارا) همه سبک‌ها"
+        title="Efficient Frontier (مرز کارا)"
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -72,7 +99,6 @@ def plot_mpt_efficient_frontier(analysis, asset_names):
         x=stds, y=rets, mode='lines+markers',
         line=dict(color='blue', width=2), name='مرز کارا MPT'
     ))
-    # نمایش نقطه بیشینه شارپ و ... (به انتخاب شما)
     idx_max_sharpe = np.argmax(sharpes)
     fig.add_trace(go.Scatter(
         x=[stds[idx_max_sharpe]], y=[rets[idx_max_sharpe]],
@@ -93,7 +119,7 @@ def price_forecast_section(prices_df, asset_names):
     except ImportError:
         st.warning("پیش‌بینی قیمت نیاز به statsmodels دارد. با دستور pip install statsmodels نصب کنید.")
         return
-    steps = st.slider("تعداد گام پیش‌بینی (ماه)", 3, 36, 12)
+    steps = st.slider("تعداد ماه پیش‌بینی", 3, 36, 12)
     cols = st.columns(len(asset_names))
     for i, name in enumerate(asset_names):
         with cols[i]:
