@@ -41,7 +41,6 @@ def plot_married_put(name):
     break_even = x[idx_be]
     break_even_y = total_pnl[idx_be]
     break_even_percent = percent_profit[idx_be]
-
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(
         x=x[total_pnl>=0],
