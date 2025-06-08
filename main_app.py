@@ -2,116 +2,123 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from portfolio_analysis import analyze_portfolio, get_optimal_weights, get_risk_return_summary, compare_styles_plot
-from insurance import insurance_effect_on_cov, show_option_pnl_chart
-from ui_helpers import format_money, format_percent, format_float, download_excel, validate_investment_input
+import yfinance as yf
 
-st.set_page_config(page_title="تحلیل و شبیه‌سازی پرتفو", layout="wide")
-st.title("🧮 ابزار تحلیل و شبیه‌سازی پرتفو")
+from ui_helpers import format_money, format_percent, format_float, download_link
+from data_handlers import read_csv_file, get_price_dataframe_from_yf
+from portfolio_analysis import run_portfolio_analysis
+from insurance import insurance_input_sidebar, plot_married_put
 
-# نمونه دیتا تستی برای راحتی کاربر
-if st.button("🌟 بارگذاری داده تستی"):
-    st.session_state["downloaded_dfs"] = [
-        ("BTC-USD", pd.DataFrame({"Date": pd.date_range("2023-01-01", periods=12, freq="M"),
-                                  "Price": np.linspace(20000, 40000, 12)})),
-        ("ETH-USD", pd.DataFrame({"Date": pd.date_range("2023-01-01", periods=12, freq="M"),
-                                  "Price": np.linspace(1000, 2500, 12)}))
-    ]
+# ========== Session State ==========
+if "downloaded_dfs" not in st.session_state:
+    st.session_state["downloaded_dfs"] = []
+if "uploaded_dfs" not in st.session_state:
     st.session_state["uploaded_dfs"] = []
+if "insured_assets" not in st.session_state:
+    st.session_state["insured_assets"] = {}
+if "investment_amount" not in st.session_state:
+    st.session_state["investment_amount"] = 1000.0
 
-# بارگذاری و حذف دارایی‌ها (تکمیل کن با کد قبلی خودت!)
-# ...
-
-# مقدار سرمایه‌گذاری (ورودی با اعتبارسنجی و فرمت)
-st.sidebar.subheader("💵 مقدار کل سرمایه‌گذاری (دلار)")
-investment_amount = st.sidebar.text_input(
-    "سرمایه کل", value=str(st.session_state.get('investment_amount', 1000)),
-    help="عدد را وارد کنید. برای مثال: 2572 یا 0.1"
-)
-investment_amount_valid, investment_amount_val = validate_investment_input(investment_amount)
-if not investment_amount_valid:
-    st.sidebar.error("مقدار سرمایه معتبر نیست!")
-else:
-    st.session_state['investment_amount'] = investment_amount_val
-    st.sidebar.markdown(f"مقدار فعلی: <b>{format_money(investment_amount_val)}</b>", unsafe_allow_html=True)
-
-# بیمه (Married Put) و اثر آن روی پرتفو
-# ... (مطابق insurance.py و با اعتبارسنجی)
-
-# پارامترهای پرتفو
-# ...
-
-# ساخت دیتافریم قیمت‌ها و اسامی دارایی‌ها
-if "downloaded_dfs" not in st.session_state: st.session_state["downloaded_dfs"] = []
-if "uploaded_dfs" not in st.session_state: st.session_state["uploaded_dfs"] = []
-if len(st.session_state.get("downloaded_dfs", [])) + len(st.session_state.get("uploaded_dfs", [])) < 2:
-    st.warning("حداقل دو دارایی برای تحلیل پرتفو لازم است.")
-    st.stop()
-
-asset_names, dfs = [], []
-for t, df in st.session_state["downloaded_dfs"]: asset_names.append(t); dfs.append(df)
-for t, df in st.session_state["uploaded_dfs"]: asset_names.append(t); dfs.append(df)
-# Merge all dataframes on Date
-prices_df = dfs[0][['Date', 'Price']].rename(columns={'Price': asset_names[0]}).set_index('Date')
-for i in range(1, len(dfs)):
-    prices_df = prices_df.join(dfs[i][['Date', 'Price']].rename(columns={'Price': asset_names[i]}).set_index('Date'), how='inner')
-
-# اعمال بیمه روی کوواریانس
-insured_assets = st.session_state.get("insured_assets", {})
-cov_matrix_adj = insurance_effect_on_cov(prices_df, insured_assets)
-
-# تحلیل پرتفو
-portfolio_results = analyze_portfolio(
-    prices_df, cov_matrix_adj, st.session_state["investment_amount"], insured_assets
+# ========== Sidebar: File Upload/Delete ==========
+st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
+uploaded_files = st.sidebar.file_uploader(
+    "چند فایل CSV آپلود کنید (هر دارایی یک فایل)", type=['csv'], accept_multiple_files=True, key="uploader"
 )
 
-# نمایش وزن و مقدار دلاری هر دارایی در سه سبک
-st.markdown("### 💰 ترکیب سرمایه‌گذاری هر سبک")
-for style in ["Monte Carlo", "CVaR", "MPT"]:
-    st.markdown(f"**{style}:**")
-    weights = get_optimal_weights(portfolio_results, style)
-    cols = st.columns(len(asset_names))
-    for i, name in enumerate(asset_names):
-        percent = weights[i]
-        dollar = percent * st.session_state["investment_amount"]
-        with cols[i]:
-            st.markdown(f"""
-            <div style='text-align:center;direction:rtl'>
-            <b>{name}</b><br>
-            {format_percent(percent)}<br>
-            {format_money(dollar)}
-            </div>
-            """, unsafe_allow_html=True)
+if st.session_state["downloaded_dfs"]:
+    st.sidebar.markdown("<b>حذف دارایی‌های دانلود شده:</b>", unsafe_allow_html=True)
+    for idx, (t, df) in enumerate(st.session_state["downloaded_dfs"]):
+        col1, col2 = st.sidebar.columns([3, 1])
+        with col1:
+            st.markdown(f"<div dir='rtl' style='text-align: right; font-size: 14px'>{t}</div>", unsafe_allow_html=True)
+        with col2:
+            if st.button("❌", key=f"delete_dl_{t}_{idx}"):
+                st.session_state["insured_assets"].pop(t, None)
+                st.session_state["downloaded_dfs"].pop(idx)
+                st.experimental_rerun()
 
-# نمایش خلاصه ریسک و بازده
-st.markdown("### 📊 داشبورد خلاصه پرتفو")
-risk_return_summary = get_risk_return_summary(portfolio_results)
-st.dataframe(risk_return_summary, use_container_width=True)
+if st.session_state["uploaded_dfs"]:
+    st.sidebar.markdown("<b>حذف دارایی‌های آپلود شده:</b>", unsafe_allow_html=True)
+    for idx, (t, df) in enumerate(st.session_state["uploaded_dfs"]):
+        col1, col2 = st.sidebar.columns([3, 1])
+        with col1:
+            st.markdown(f"<div dir='rtl' style='text-align: right; font-size: 14px'>{t}</div>", unsafe_allow_html=True)
+        with col2:
+            if st.button("❌", key=f"delete_up_{t}_{idx}"):
+                st.session_state["insured_assets"].pop(t, None)
+                st.session_state["uploaded_dfs"].pop(idx)
+                st.experimental_rerun()
 
-# نمایش نمودار مقایسه‌ای ریسک-بازده سه سبک
-st.markdown("### 📈 مقایسه بصری سبک‌های پرتفو")
-fig_compare = compare_styles_plot(portfolio_results, asset_names)
-st.plotly_chart(fig_compare, use_container_width=True)
+# ========== Sidebar: Params and Yahoo Download ==========
+period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
+resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'شش‌ماهه': '2Q'}[period]
+annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}[period]
+user_risk = st.sidebar.slider("ریسک هدف پرتفو (انحراف معیار سالانه)", 0.01, 1.0, 0.25, 0.01)
+cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
 
-# نمایش نمودار سود/زیان بیمه برای هر دارایی (با درصد و نقطه سر به سر دقیق)
-st.markdown("### 📉 بیمه دارایی‌ها (Married Put)")
-for name in insured_assets:
-    info = insured_assets[name]
-    fig_option = show_option_pnl_chart(info)
-    st.markdown(f"<b>{name}</b>", unsafe_allow_html=True)
-    st.plotly_chart(fig_option, use_container_width=True)
-
-# خروجی گرفتن: Excel
-st.markdown("### 📤 ذخیره گزارش")
-excel_buffer = download_excel(portfolio_results, asset_names)
-st.download_button("دانلود خروجی Excel", excel_buffer, file_name="portfolio_report.xlsx")
-st.info("برای خروجی PDF از دکمه print مرورگر یا افزونه PDF استفاده کنید (یا درخواست دهید تا نمونه کد ارائه شود).")
-
-# راهنمای کاربری و FAQ
-with st.expander("📚 راهنمای استفاده و سوالات متداول"):
+with st.sidebar.expander("📥 دانلود داده آنلاین از Yahoo Finance"):
     st.markdown("""
-    - برای شروع، داده‌های دارایی‌های خود را بارگذاری یا دانلود کنید.
-    - بیمه اختیاری است اما اثر آن به صورت دقیق روی ریسک پرتفو لحاظ می‌شود.
-    - می‌توانید وزن هر دارایی را به‌صورت دستی وارد کنید (در آینده).
-    - خروجی Excel شامل تمام وزن‌ها و بازده‌هاست.
-    """)
+    <div dir="rtl" style="text-align: right;">
+    <b>راهنما:</b>
+    <br>نمادها را با کاما و بدون فاصله وارد کنید (مثال: <span style="direction:ltr;display:inline-block">BTC-USD,AAPL,ETH-USD</span>)
+    </div>
+    """, unsafe_allow_html=True)
+    tickers_input = st.text_input("نماد دارایی‌ها (با کاما و بدون فاصله)")
+    start = st.date_input("تاریخ شروع", value=pd.to_datetime("2023-01-01"))
+    end = st.date_input("تاریخ پایان", value=pd.to_datetime("today"))
+    download_btn = st.button("دریافت داده آنلاین")
+
+if download_btn and tickers_input.strip():
+    tickers = [t.strip() for t in tickers_input.strip().split(",") if t.strip()]
+    try:
+        data = yf.download(tickers, start=start, end=end, progress=False, group_by='ticker', auto_adjust=True)
+        if data.empty:
+            st.error("داده‌ای دریافت نشد!")
+        else:
+            new_downloaded = []
+            for t in tickers:
+                df, err = get_price_dataframe_from_yf(data, t)
+                if df is not None:
+                    df['Date'] = pd.to_datetime(df['Date'])
+                    new_downloaded.append((t, df))
+                    st.success(f"داده {t} با موفقیت دانلود شد.")
+                    st.markdown(download_link(df, f"{t}_historical.csv"), unsafe_allow_html=True)
+                else:
+                    st.error(f"{err}")
+            st.session_state["downloaded_dfs"].extend(new_downloaded)
+    except Exception as ex:
+        st.error(f"خطا در دریافت داده: {ex}")
+
+if uploaded_files:
+    for file in uploaded_files:
+        if not hasattr(file, "uploaded_in_session") or not file.uploaded_in_session:
+            df = read_csv_file(file)
+            if df is not None:
+                st.session_state["uploaded_dfs"].append((file.name.split('.')[0], df))
+            file.uploaded_in_session = True
+
+# ========== Sidebar: Investment Amount & Insurance ==========
+all_asset_names = [t for t, _ in st.session_state["downloaded_dfs"]] + [t for t, _ in st.session_state["uploaded_dfs"]]
+
+with st.sidebar.expander("💵 مقدار کل سرمایه‌گذاری (معادل دلاری)", expanded=True):
+    investment_amount = st.text_input("مقدار سرمایه کل (دلار)", value=format_float(st.session_state["investment_amount"]).replace(',', ''), key="inv_amount_inp")
+    try:
+        val = float(investment_amount.replace('٫', '.').replace(',', ''))
+        if val < 0:
+            val = 0
+    except:
+        val = 0
+    st.session_state["investment_amount"] = val
+    st.markdown(f"مقدار واردشده: <b>{format_money(val)}</b>", unsafe_allow_html=True)
+
+for name in all_asset_names:
+    insurance_input_sidebar(name)
+
+# ========== Main Analysis ==========
+if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
+    run_portfolio_analysis(resample_rule, annual_factor, user_risk, cvar_alpha)
+    st.subheader("📉 بیمه دارایی‌ها (Married Put)")
+    for name in st.session_state["insured_assets"]:
+        plot_married_put(name)
+else:
+    st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price یا Close یا Open را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
