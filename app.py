@@ -14,6 +14,8 @@ if "uploaded_dfs" not in st.session_state:
     st.session_state["uploaded_dfs"] = []
 if "insured_assets" not in st.session_state:
     st.session_state["insured_assets"] = {}
+if "investment_amount" not in st.session_state:
+    st.session_state["investment_amount"] = 1000.0
 
 # =========================
 # 2. تابع خواندن فایل csv و استخراج price/date
@@ -117,6 +119,8 @@ def calculate_max_drawdown(prices: pd.Series) -> float:
 # 6. محاسبه مرز کارا (Efficient Frontier) مارکویتز
 # =========================
 def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200):
+    mean_returns = np.atleast_1d(np.array(mean_returns))
+    cov_matrix = np.atleast_2d(np.array(cov_matrix))
     num_assets = len(mean_returns)
     results = np.zeros((3, points))
     weight_record = []
@@ -133,25 +137,27 @@ def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200):
 # =========================
 # 7. نمایش بازده و ریسک پرتفوی در بازه های مختلف
 # =========================
-def show_periodic_risk_return(resampled_prices, weights, label):
+def portfolio_risk_return(resampled_prices, weights, freq_label="M"):
     pf_prices = (resampled_prices * weights).sum(axis=1)
     pf_returns = pf_prices.pct_change().dropna()
-    ann_factor = 12 if resampled_prices.index.freqstr and resampled_prices.index.freqstr.upper().startswith('M') else 52
-    mean_ann = pf_returns.mean() * ann_factor
-    risk_ann = pf_returns.std() * (ann_factor ** 0.5)
-    pf_prices_monthly = pf_prices.resample('M').last().dropna()
-    pf_returns_monthly = pf_prices_monthly.pct_change().dropna()
-    mean_month = pf_returns_monthly.mean()
-    risk_month = pf_returns_monthly.std()
-    pf_prices_weekly = pf_prices.resample('W').last().dropna()
-    pf_returns_weekly = pf_prices_weekly.pct_change().dropna()
-    mean_week = pf_returns_weekly.mean()
-    risk_week = pf_returns_weekly.std()
-    st.markdown(f"#### 📊 {label}")
+    if freq_label == "M":
+        ann_factor = 12
+    elif freq_label == "W":
+        ann_factor = 52
+    else:
+        ann_factor = 1
+    mean_month = pf_returns.mean()
+    risk_month = pf_returns.std()
+    mean_ann = mean_month * ann_factor
+    risk_ann = risk_month * (ann_factor ** 0.5)
+    return mean_month, risk_month, mean_ann, risk_ann
+
+def show_periodic_risk_return(resampled_prices, weights, label):
+    mean_m, risk_m, mean_a, risk_a = portfolio_risk_return(resampled_prices, weights, freq_label="M")
     st.markdown(f"""<div dir="rtl" style="text-align:right">
-    <b>سالانه:</b> بازده: {mean_ann:.2%} | ریسک: {risk_ann:.2%}<br>
-    <b>ماهانه:</b> بازده: {mean_month:.2%} | ریسک: {risk_month:.2%}<br>
-    <b>هفتگی:</b> بازده: {mean_week:.2%} | ریسک: {risk_week:.2%}
+    <b>{label}</b><br>
+    <b>سالانه:</b> بازده: {mean_a:.2%} | ریسک: {risk_a:.2%}<br>
+    <b>ماهانه:</b> بازده: {mean_m:.2%} | ریسک: {risk_m:.2%}
     </div>
     """, unsafe_allow_html=True)
 
@@ -166,14 +172,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================
-# 9. بارگذاری و حذف دارایی‌های دانلودی و آپلودی
+# 9. بارگذاری و حذف دارایی‌های دانلودی و آپلودی (حذف دستی)
 # =========================
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV آپلود کنید (هر دارایی یک فایل)", type=['csv'], accept_multiple_files=True, key="uploader"
 )
 
-# حذف دارایی دانلودی از لیست
+# حذف دارایی دانلودی از لیست (قابلیت حذف دستی)
 if st.session_state["downloaded_dfs"]:
     st.sidebar.markdown("<b>حذف دارایی‌های دانلود شده:</b>", unsafe_allow_html=True)
     for idx, (t, df) in enumerate(st.session_state["downloaded_dfs"]):
@@ -182,6 +188,7 @@ if st.session_state["downloaded_dfs"]:
             st.markdown(f"<div dir='rtl' style='text-align: right; font-size: 14px'>{t}</div>", unsafe_allow_html=True)
         with col2:
             if st.button("❌", key=f"delete_dl_{t}_{idx}"):
+                st.session_state["insured_assets"].pop(t, None)
                 st.session_state["downloaded_dfs"].pop(idx)
                 st.experimental_rerun()
 
@@ -194,6 +201,7 @@ if st.session_state["uploaded_dfs"]:
             st.markdown(f"<div dir='rtl' style='text-align: right; font-size: 14px'>{t}</div>", unsafe_allow_html=True)
         with col2:
             if st.button("❌", key=f"delete_up_{t}_{idx}"):
+                st.session_state["insured_assets"].pop(t, None)
                 st.session_state["uploaded_dfs"].pop(idx)
                 st.experimental_rerun()
 
@@ -256,28 +264,30 @@ if uploaded_files:
             file.uploaded_in_session = True
 
 # =========================
-# 13. بیمه برای هر دارایی (Married Put)
+# 13. بیمه برای هر دارایی (Married Put) و دریافت مقدار سرمایه گذاری کل
 # =========================
 all_asset_names = [t for t, _ in st.session_state["downloaded_dfs"]] + [t for t, _ in st.session_state["uploaded_dfs"]]
+
+with st.sidebar.expander("💵 مقدار کل سرمایه‌گذاری (معادل دلاری)", expanded=True):
+    investment_amount = st.number_input("مقدار سرمایه کل (دلار)", min_value=0.0, value=st.session_state["investment_amount"], step=100.0, format="%.3f")
+    st.session_state["investment_amount"] = investment_amount
+
 for name in all_asset_names:
     with st.sidebar.expander(f"⚙️ بیمه برای {name}", expanded=False):
         st.markdown("""
         <div dir="rtl" style="text-align: right;">
         <b>Married Put چیست؟</b>
-        <br>بیمه در پرتفو (Married Put) یعنی شما همزمان با نگهداری دارایی، یک قرارداد اختیار فروش (Put Option) برای همان دارایی می‌خرید. اگر قیمت دارایی به شدت سقوط کند، این قرارداد از شما محافظت می‌کند و ضرر شما را محدود می‌سازد.
-        <br><b>اگر بیمه نگیرید:</b> در صورت ریزش شدید قیمت، کل ضرر را متحمل می‌شوید و هیچ پوششی ندارید.
-        <br><b>اگر بیمه بگیرید:</b> حتی اگر قیمت دارایی خیلی پایین بیاید، بخش اعظم ضرر شما تا حد strike price جبران می‌شود.
-        <br><b>مثال:</b> فرض کنید بیت‌کوین دارید و Put با قیمت اعمال ۵۰,۰۰۰ دلار خریده‌اید. اگر قیمت بیت‌کوین به ۳۰,۰۰۰ برسد، ضرر شما نسبت به کسی که بیمه ندارد بسیار کمتر می‌شود.
+        <br>بیمه در پرتفو (Married Put) یعنی شما همزمان با نگهداری دارایی، یک قرارداد اختیار فروش (Put Option) برای همان دارایی [...]
         </div>
         """, unsafe_allow_html=True)
         insured = st.checkbox(f"فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
         if insured:
-            loss_percent = st.number_input(f"📉 درصد ضرر معامله پوت برای {name}", 0.0, 100.0, 30.0, step=0.01, key=f"loss_{name}")
-            strike = st.number_input(f"🎯 قیمت اعمال پوت برای {name}", 0.0, 1e6, 100.0, step=0.01, key=f"strike_{name}")
-            premium = st.number_input(f"💰 قیمت قرارداد پوت برای {name}", 0.0, 1e6, 5.0, step=0.01, key=f"premium_{name}")
-            amount = st.number_input(f"📦 مقدار قرارداد برای {name}", 0.0, 1e6, 1.0, step=0.01, key=f"amount_{name}")
-            spot_price = st.number_input(f"📌 قیمت فعلی دارایی پایه {name}", 0.0, 1e6, 100.0, step=0.01, key=f"spot_{name}")
-            asset_amount = st.number_input(f"📦 مقدار دارایی پایه {name}", 0.0, 1e6, 1.0, step=0.01, key=f"base_{name}")
+            loss_percent = st.number_input(f"📉 درصد ضرر معامله پوت برای {name}", 0.0, 100.0, 30.0, step=0.01, format="%.3f", key=f"loss_{name}")
+            strike = st.number_input(f"🎯 قیمت اعمال پوت برای {name}", 0.0, 1e6, 100.0, step=0.01, format="%.3f", key=f"strike_{name}")
+            premium = st.number_input(f"💰 قیمت قرارداد پوت برای {name}", 0.0, 1e6, 5.0, step=0.01, format="%.3f", key=f"premium_{name}")
+            amount = st.number_input(f"📦 مقدار قرارداد برای {name}", 0.0, 1e6, 1.0, step=0.01, format="%.3f", key=f"amount_{name}")
+            spot_price = st.number_input(f"📌 قیمت فعلی دارایی پایه {name}", 0.0, 1e6, 100.0, step=0.01, format="%.3f", key=f"spot_{name}")
+            asset_amount = st.number_input(f"📦 مقدار دارایی پایه {name}", 0.0, 1e6, 1.0, step=0.01, format="%.3f", key=f"base_{name}")
             st.session_state["insured_assets"][name] = {
                 'loss_percent': loss_percent,
                 'strike': strike,
@@ -315,39 +325,23 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         asset_names.append(name)
 
     st.subheader("📉 روند قیمت دارایی‌ها")
-    st.markdown("""
-    <div dir="rtl" style="text-align: right;">
-    این نمودار، روند تاریخی قیمت هر دارایی (asset) را در بازه انتخابی نمایش می‌دهد. این به شما کمک می‌کند نوسانات و روند کلی هر دارایی را ببینید.<br>
-    اگر بین اعداد انگلیسی و فارسی یا نماد انگلیسی و فارسی فاصله بیفتد، نمایش داده اصلاح می‌شود.
-    </div>
-    """, unsafe_allow_html=True)
     st.line_chart(prices_df.resample(resample_rule).last().dropna())
 
-    if prices_df.empty:
+    if prices_df.empty or len(asset_names) < 1:
         st.error("❌ داده‌ی معتبری برای تحلیل یافت نشد.")
+        st.stop()
+
+    if len(asset_names) < 2:
+        st.warning('برای تحلیل پرتفوی، حداقل دو دارایی انتخاب کنید.')
         st.stop()
 
     try:
         resampled_prices = prices_df.resample(resample_rule).last().dropna()
         returns = resampled_prices.pct_change().dropna()
-        mean_returns = returns.mean() * annual_factor
-        cov_matrix = returns.cov() * annual_factor
-        std_devs = np.sqrt(np.diag(cov_matrix))
+        mean_returns = np.atleast_1d(np.array(returns.mean() * annual_factor))
+        cov_matrix = np.atleast_2d(np.array(returns.cov() * annual_factor))
+        std_devs = np.atleast_1d(np.sqrt(np.diag(cov_matrix)))
 
-        # توضیح سبک های پرتفوی و ...
-        st.subheader("📚 سبک‌های بهینه‌سازی پرتفو (Portfolio Optimization Styles)")
-        st.markdown("""
-        <div dir="rtl" style="text-align: right;">
-        <ul>
-        <li><b>مونت‌کارلو (Monte Carlo):</b> با شبیه‌سازی تصادفی هزاران ترکیب وزنی، پرتفوهایی با ریسک و بازده مختلف تولید می‌شود و بهترین‌ها انتخاب می‌شوند.</li>
-        <li><b>CVaR:</b> پرتفوهایی که کمترین ریسک بحران (زیان شدید) را دارند، با معیار CVaR (Conditional Value at Risk) بهینه می‌شوند.</li>
-        <li><b>مرز کارا (Efficient Frontier):</b> این سبک بر اساس نظریه مارکویتز (Markowitz) است و بهترین ترکیب دارایی‌ها با حداکثر بازده نسبت به ریسک را پیدا می‌کند.</li>
-        </ul>
-        اگر در جمله بین نام سبک انگلیسی و کلمات فارسی فاصله بیفتد، نمایش صحیح خواهد بود.
-        </div>
-        """, unsafe_allow_html=True)
-
-        # مونت کارلو و CVaR و مابقی تحلیل‌ها (عین قبل)
         n_portfolios = 3000
         n_mc = 1000
         results = np.zeros((5 + len(asset_names), n_portfolios))
@@ -361,8 +355,8 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         for i, name in enumerate(asset_names):
             if name in st.session_state["insured_assets"]:
                 risk_scale = 1 - st.session_state["insured_assets"][name]['loss_percent'] / 100
-                adjusted_cov.iloc[i, :] *= risk_scale
-                adjusted_cov.iloc[:, i] *= risk_scale
+                adjusted_cov[i, :] *= risk_scale
+                adjusted_cov[:, i] *= risk_scale
                 preference_weights.append(1 / (std_devs[i] * risk_scale**0.7))
             else:
                 preference_weights.append(1 / std_devs[i])
@@ -396,9 +390,30 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         best_cvar_idx = np.argmin(results[4])
         best_cvar_weights = results[5:, best_cvar_idx]
 
+        ef_results, ef_weights = efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200)
+        max_sharpe_idx = np.argmax(ef_results[2])
+        mpt_weights = ef_weights[max_sharpe_idx]
+
         st.subheader("📊 داشبورد خلاصه پرتفو")
         show_periodic_risk_return(resampled_prices, best_weights, "پرتفو بهینه مونت‌کارلو")
         show_periodic_risk_return(resampled_prices, best_cvar_weights, f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)")
+        show_periodic_risk_return(resampled_prices, mpt_weights, "پرتفو بهینه MPT")
+
+        # جزئیات دقیق ریسک و بازده هر سبک
+        st.markdown("### 📋 جزئیات ریسک و بازده هر سبک")
+        for label, weights in [
+            ("پرتفو بهینه مونت‌کارلو", best_weights),
+            (f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)", best_cvar_weights),
+            ("پرتفو بهینه MPT", mpt_weights)
+        ]:
+            mean_m, risk_m, mean_a, risk_a = portfolio_risk_return(resampled_prices, weights, freq_label="M")
+            st.markdown(f"""<div dir="rtl" style="text-align:right">
+            <b>{label}</b><br>
+            • بازده ماهانه: {mean_m:.3%} <br>
+            • ریسک ماهانه: {risk_m:.3%} <br>
+            • بازده سالانه: {mean_a:.3%} <br>
+            • ریسک سالانه: {risk_a:.3%} <br>
+            </div>""", unsafe_allow_html=True)
 
         fig_pie = go.Figure(data=[
             go.Pie(labels=asset_names, values=best_weights * 100, hole=.5, textinfo='label+percent')
@@ -463,9 +478,6 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         fig_cvar.update_layout(title=f"نمودار ریسک-بازده پرتفوها با رنگ CVaR ({int(cvar_alpha*100)}%)", xaxis_title="ریسک (%)", yaxis_title="بازده (%)")
         st.plotly_chart(fig_cvar, use_container_width=True)
 
-        ef_results, ef_weights = efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200)
-        max_sharpe_idx = np.argmax(ef_results[2])
-        mpt_weights = ef_weights[max_sharpe_idx]
         fig_ef = go.Figure()
         fig_ef.add_trace(go.Scatter(
             x=ef_results[0]*100, y=ef_results[1]*100,
@@ -497,18 +509,45 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             asset_pnl = (x - info['spot']) * info['base']
             put_pnl = np.where(x < info['strike'], (info['strike'] - x) * info['amount'], 0) - info['premium'] * info['amount']
             total_pnl = asset_pnl + put_pnl
+
+            break_even = info['strike'] - info['premium']
+            break_even_y = (break_even - info['spot']) * info['base'] + max(info['strike'] - break_even, 0) * info['amount'] - info['premium'] * info['amount']
+
+            initial_cost = info['spot'] * info['base'] + info['premium'] * info['amount']
+            percent_profit = 100 * total_pnl / initial_cost
+
             fig2 = go.Figure()
             fig2.add_trace(go.Scatter(
-                x=x[total_pnl>=0], y=total_pnl[total_pnl>=0], mode='lines', name='سود', line=dict(color='green', width=3)
+                x=x[total_pnl>=0],
+                y=total_pnl[total_pnl>=0],
+                mode='lines',
+                name='سود',
+                line=dict(color='green', width=3),
+                customdata=np.stack([percent_profit[total_pnl>=0]], axis=-1).T,
+                hovertemplate='قیمت: %{x:.3f}<br>سود: %{y:.3f}<br>درصد سود: %{customdata[0]:.2f}%<extra></extra>'
             ))
             fig2.add_trace(go.Scatter(
-                x=x[total_pnl<0], y=total_pnl[total_pnl<0], mode='lines', name='زیان', line=dict(color='red', width=3)
+                x=x[total_pnl<0],
+                y=total_pnl[total_pnl<0],
+                mode='lines',
+                name='زیان',
+                line=dict(color='red', width=3),
+                customdata=np.stack([percent_profit[total_pnl<0]], axis=-1).T,
+                hovertemplate='قیمت: %{x:.3f}<br>زیان: %{y:.3f}<br>درصد زیان: %{customdata[0]:.2f}%<extra></extra>'
             ))
             fig2.add_trace(go.Scatter(
                 x=x, y=asset_pnl, mode='lines', name='دارایی پایه', line=dict(dash='dot', color='gray')
             ))
             fig2.add_trace(go.Scatter(
                 x=x, y=put_pnl, mode='lines', name='پوت', line=dict(dash='dot', color='blue')
+            ))
+            fig2.add_trace(go.Scatter(
+                x=[break_even], y=[break_even_y], mode='markers+text',
+                marker=dict(size=14, color='orange', symbol='x'),
+                text=['سر به سر'],
+                textposition="top right",
+                name='نقطه سر به سر',
+                hovertemplate='قیمت سر به سر: %{x:.3f}<br>بازده: %{y:.3f}<extra></extra>'
             ))
             st.markdown(f"<b>{name}</b>", unsafe_allow_html=True)
             st.plotly_chart(fig2, use_container_width=True)
@@ -530,11 +569,11 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
 
             fig3 = go.Figure()
             fig3.add_trace(go.Histogram(x=sim_prices, nbinsx=20, name="پیش‌بینی قیمت", marker_color='purple'))
-            fig3.add_vline(x=future_price_mean, line_dash="dash", line_color="green", annotation_text=f"میانگین: {future_price_mean:.2f}")
+            fig3.add_vline(x=future_price_mean, line_dash="dash", line_color="green", annotation_text=f"میانگین: {future_price_mean:.3f}")
             fig3.update_layout(title=f"پیش‌بینی قیمت {name} در {future_months} ماه آینده",
                 xaxis_title="قیمت انتهایی", yaxis_title="تعداد شبیه‌سازی")
             st.plotly_chart(fig3, use_container_width=True)
-            st.markdown(f"📈 **میانگین قیمت آینده:** {future_price_mean:.2f} | 📊 **درصد بازده آتی:** {future_return:.2%}")
+            st.markdown(f"📈 **میانگین قیمت آینده:** {future_price_mean:.3f} | 📊 **درصد بازده آتی:** {future_return:.3%}")
 
     except Exception as e:
         st.error(f"خطای تحلیل پرتفو: {e}")
