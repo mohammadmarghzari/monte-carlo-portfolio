@@ -1,10 +1,9 @@
-import pandas as pd
-from io import BytesIO
+import base64
 
 def format_money(val):
     if val == 0:
         return "۰ دلار"
-    elif abs(val) >= 1:
+    elif val >= 1:
         return "{:,.0f} دلار".format(val)
     else:
         return "{:.3f} دلار".format(val).replace('.', '٫')
@@ -18,20 +17,7 @@ def format_float(val):
     else:
         return "{:.6f}".format(val).rstrip('0').rstrip('.')
 
-def download_excel(results, asset_names):
-    df = pd.DataFrame(results)
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, sheet_name='Summary')
-    output.seek(0)
-    return output
-
-def validate_investment_input(val):
-    try:
-        val = float(str(val).replace('٫', '.').replace(',', ''))
-        if val >= 0:
-            return True, val
-        else:
-            return False, 0
-    except Exception:
-        return False, 0
+def download_link(df, filename):
+    csv = df.reset_index(drop=True).to_csv(index=False).encode()
+    b64 = base64.b64encode(csv).decode()
+    return f'<a href="data:file/csv;base64,{b64}" download="{filename}">⬇️ دریافت فایل CSV</a>'
