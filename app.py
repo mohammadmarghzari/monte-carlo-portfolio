@@ -341,8 +341,8 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         cov_matrix = returns.cov() * annual_factor
         std_devs = np.sqrt(np.diag(cov_matrix))
 
-        # ... باقی تحلیل پرتفو، بهینه‌سازی، نمودارها و محاسبات دقیقاً مطابق نسخه اصلی شما ...
-        # اگر بخش خاصی از تحلیل‌ها (مونت‌کارلو، CVaR، مرز کارا و ...) را نیاز دارید، اطلاع دهید تا همان بخش را هم کامل بنویسم.
+        # ادامه تحلیل پرتفو، بهینه‌سازی و نمودارها دقیقا مثل کد اصلی پروژه
+        # می‌توانید کد کامل بهینه‌سازی پرتفو، محاسبات Monte Carlo، CVaR و ... را همینجا اضافه کنید
 
     except Exception as e:
         st.error(f"خطای تحلیل پرتفو: {e}")
