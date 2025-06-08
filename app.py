@@ -4,7 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 import yfinance as yf
 
-# --- 1. Session State ---
+# ----- 1. Session State -----
 if "downloaded_dfs" not in st.session_state:
     st.session_state["downloaded_dfs"] = []
 if "uploaded_dfs" not in st.session_state:
@@ -12,7 +12,7 @@ if "uploaded_dfs" not in st.session_state:
 if "insured_assets" not in st.session_state:
     st.session_state["insured_assets"] = {}
 
-# --- 2. Read CSV ---
+# ----- 2. Read CSV -----
 def read_csv_file(file):
     try:
         df = pd.read_csv(file)
@@ -29,7 +29,7 @@ def read_csv_file(file):
         st.error(f"خطا در خواندن فایل: {e}")
         return None
 
-# --- 3. Yahoo Finance Extract ---
+# ----- 3. Yahoo Finance Extract -----
 def get_price_dataframe_from_yf(data, t):
     if isinstance(data.columns, pd.MultiIndex):
         if t in data.columns.levels[0]:
@@ -52,15 +52,16 @@ def get_price_dataframe_from_yf(data, t):
         df = data[['Date', price_col]].rename(columns={price_col: 'Price'})
         return df
 
-# --- 4. Manage Delete Asset ---
-def delete_asset(asset_key, source):
+# ----- 4. Manage Delete Asset -----
+def delete_asset(asset_key, source, idx):
     if source == "downloaded":
-        st.session_state["downloaded_dfs"] = [item for item in st.session_state["downloaded_dfs"] if f"downloaded_{item[0]}" != asset_key]
+        del st.session_state["downloaded_dfs"][idx]
     else:
-        st.session_state["uploaded_dfs"] = [item for item in st.session_state["uploaded_dfs"] if f"uploaded_{item[0]}" != asset_key]
+        del st.session_state["uploaded_dfs"][idx]
     st.session_state["insured_assets"].pop(asset_key, None)
+    st.experimental_rerun()
 
-# --- 5. Sidebar Upload/Download/Remove ---
+# ----- 5. Sidebar Upload/Download/Remove -----
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV آپلود کنید (هر دارایی یک فایل)", type=['csv'], accept_multiple_files=True
@@ -68,7 +69,7 @@ uploaded_files = st.sidebar.file_uploader(
 if uploaded_files:
     for file in uploaded_files:
         df = read_csv_file(file)
-        if df is not None and f"uploaded_{file.name.split('.')[0]}" not in [k for k in st.session_state["insured_assets"]]:
+        if df is not None:
             st.session_state["uploaded_dfs"].append((file.name.split('.')[0], df))
 
 with st.sidebar.expander("📥 دانلود داده آنلاین از Yahoo Finance"):
@@ -81,35 +82,36 @@ if download_btn and tickers_input.strip():
     data = yf.download(tickers, start=start, end=end, progress=False, group_by='ticker', auto_adjust=True)
     for t in tickers:
         df = get_price_dataframe_from_yf(data, t)
-        if df is not None and f"downloaded_{t}" not in [k for k in st.session_state["insured_assets"]]:
+        if df is not None:
             df['Date'] = pd.to_datetime(df['Date'])
             st.session_state["downloaded_dfs"].append((t, df))
 
-# --- 6. Delete Buttons ---
+# ----- 6. Delete Buttons -----
 st.sidebar.markdown("### حذف دارایی")
-for t, df in st.session_state["downloaded_dfs"]:
-    asset_key = f"downloaded_{t}"
-    if st.sidebar.button(f"❌ حذف {t} (دانلود)", key=f"del_downloaded_{t}"):
-        delete_asset(asset_key, "downloaded")
-        st.experimental_rerun()
-for t, df in st.session_state["uploaded_dfs"]:
-    asset_key = f"uploaded_{t}"
-    if st.sidebar.button(f"❌ حذف {t} (آپلود)", key=f"del_uploaded_{t}"):
-        delete_asset(asset_key, "uploaded")
-        st.experimental_rerun()
+for idx, (t, df) in enumerate(st.session_state["downloaded_dfs"]):
+    asset_key = f"downloaded_{t}_{idx}"
+    if st.sidebar.button(f"❌ حذف {t} (دانلود)", key=f"del_downloaded_{t}_{idx}"):
+        delete_asset(asset_key, "downloaded", idx)
+for idx, (t, df) in enumerate(st.session_state["uploaded_dfs"]):
+    asset_key = f"uploaded_{t}_{idx}"
+    if st.sidebar.button(f"❌ حذف {t} (آپلود)", key=f"del_uploaded_{t}_{idx}"):
+        delete_asset(asset_key, "uploaded", idx)
 
-# --- 7. Sidebar Insurance Settings ---
+# ----- 7. Sidebar Insurance Settings -----
 all_asset_names = []
 asset_sources = []
-for t, df in st.session_state["downloaded_dfs"]:
+asset_idxs = []
+for idx, (t, df) in enumerate(st.session_state["downloaded_dfs"]):
     all_asset_names.append(t)
     asset_sources.append("downloaded")
-for t, df in st.session_state["uploaded_dfs"]:
+    asset_idxs.append(idx)
+for idx, (t, df) in enumerate(st.session_state["uploaded_dfs"]):
     all_asset_names.append(t)
     asset_sources.append("uploaded")
+    asset_idxs.append(idx)
 
-for name, source in zip(all_asset_names, asset_sources):
-    asset_key = f"{source}_{name}"
+for name, source, idx in zip(all_asset_names, asset_sources, asset_idxs):
+    asset_key = f"{source}_{name}_{idx}"
     with st.sidebar.expander(f"⚙️ بیمه برای {name}", expanded=False):
         insured = st.checkbox(f"فعال‌سازی بیمه برای {name}", key=f"insured_{asset_key}")
         if insured:
@@ -129,11 +131,15 @@ for name, source in zip(all_asset_names, asset_sources):
         else:
             st.session_state["insured_assets"].pop(asset_key, None)
 
-# --- 8. Portfolio Construction ---
+# ----- 8. Portfolio Construction -----
 if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     prices_df = pd.DataFrame()
-    for (t, df), source in zip(st.session_state["downloaded_dfs"] + st.session_state["uploaded_dfs"], ['downloaded']*len(st.session_state["downloaded_dfs"]) + ['uploaded']*len(st.session_state["uploaded_dfs"])):
-        asset_key = f"{source}_{t}"
+    for (t, df), source, idx in zip(
+        st.session_state["downloaded_dfs"] + st.session_state["uploaded_dfs"],
+        ["downloaded"]*len(st.session_state["downloaded_dfs"]) + ["uploaded"]*len(st.session_state["uploaded_dfs"]),
+        list(range(len(st.session_state["downloaded_dfs"]))) + list(range(len(st.session_state["uploaded_dfs"])))
+    ):
+        asset_key = f"{source}_{t}_{idx}"
         df = df.dropna(subset=['Date', 'Price'])
         df = df[['Date', 'Price']].set_index('Date')
         df.columns = [asset_key]
