@@ -53,11 +53,15 @@ def get_price_dataframe_from_yf(data, t):
         return df
 
 # ----- 4. Manage Delete Asset -----
-def delete_asset(asset_key, source, idx):
+def delete_asset(asset_key, source):
     if source == "downloaded":
-        del st.session_state["downloaded_dfs"][idx]
+        st.session_state["downloaded_dfs"] = [
+            (t, df) for (t, df) in st.session_state["downloaded_dfs"] if f"downloaded_{t}" != asset_key
+        ]
     else:
-        del st.session_state["uploaded_dfs"][idx]
+        st.session_state["uploaded_dfs"] = [
+            (t, df) for (t, df) in st.session_state["uploaded_dfs"] if f"uploaded_{t}" != asset_key
+        ]
     st.session_state["insured_assets"].pop(asset_key, None)
     st.experimental_rerun()
 
@@ -70,7 +74,9 @@ if uploaded_files:
     for file in uploaded_files:
         df = read_csv_file(file)
         if df is not None:
-            st.session_state["uploaded_dfs"].append((file.name.split('.')[0], df))
+            exists = any(file.name.split('.')[0] == t for (t, _) in st.session_state["uploaded_dfs"])
+            if not exists:
+                st.session_state["uploaded_dfs"].append((file.name.split('.')[0], df))
 
 with st.sidebar.expander("📥 دانلود داده آنلاین از Yahoo Finance"):
     tickers_input = st.text_input("نماد دارایی‌ها (مثال: BTC-USD,AAPL)")
@@ -83,35 +89,36 @@ if download_btn and tickers_input.strip():
     for t in tickers:
         df = get_price_dataframe_from_yf(data, t)
         if df is not None:
-            df['Date'] = pd.to_datetime(df['Date'])
-            st.session_state["downloaded_dfs"].append((t, df))
+            exists = any(t == td for (td, _) in st.session_state["downloaded_dfs"])
+            if not exists:
+                df['Date'] = pd.to_datetime(df['Date'])
+                st.session_state["downloaded_dfs"].append((t, df))
 
 # ----- 6. Delete Buttons -----
 st.sidebar.markdown("### حذف دارایی")
-for idx, (t, df) in enumerate(st.session_state["downloaded_dfs"]):
-    asset_key = f"downloaded_{t}_{idx}"
-    if st.sidebar.button(f"❌ حذف {t} (دانلود)", key=f"del_downloaded_{t}_{idx}"):
-        delete_asset(asset_key, "downloaded", idx)
-for idx, (t, df) in enumerate(st.session_state["uploaded_dfs"]):
-    asset_key = f"uploaded_{t}_{idx}"
-    if st.sidebar.button(f"❌ حذف {t} (آپلود)", key=f"del_uploaded_{t}_{idx}"):
-        delete_asset(asset_key, "uploaded", idx)
+for i, (t, df) in enumerate(st.session_state["downloaded_dfs"]):
+    asset_key = f"downloaded_{t}"
+    if st.sidebar.button(f"❌ حذف {t} (دانلود)", key=f"del_downloaded_{t}"):
+        delete_asset(asset_key, "downloaded")
+for i, (t, df) in enumerate(st.session_state["uploaded_dfs"]):
+    asset_key = f"uploaded_{t}"
+    if st.sidebar.button(f"❌ حذف {t} (آپلود)", key=f"del_uploaded_{t}"):
+        delete_asset(asset_key, "uploaded")
 
 # ----- 7. Sidebar Insurance Settings -----
-all_asset_names = []
+asset_keys = []
+asset_names = []
 asset_sources = []
-asset_idxs = []
-for idx, (t, df) in enumerate(st.session_state["downloaded_dfs"]):
-    all_asset_names.append(t)
+for t, _ in st.session_state["downloaded_dfs"]:
+    asset_keys.append(f"downloaded_{t}")
+    asset_names.append(t)
     asset_sources.append("downloaded")
-    asset_idxs.append(idx)
-for idx, (t, df) in enumerate(st.session_state["uploaded_dfs"]):
-    all_asset_names.append(t)
+for t, _ in st.session_state["uploaded_dfs"]:
+    asset_keys.append(f"uploaded_{t}")
+    asset_names.append(t)
     asset_sources.append("uploaded")
-    asset_idxs.append(idx)
 
-for name, source, idx in zip(all_asset_names, asset_sources, asset_idxs):
-    asset_key = f"{source}_{name}_{idx}"
+for asset_key, name, source in zip(asset_keys, asset_names, asset_sources):
     with st.sidebar.expander(f"⚙️ بیمه برای {name}", expanded=False):
         insured = st.checkbox(f"فعال‌سازی بیمه برای {name}", key=f"insured_{asset_key}")
         if insured:
@@ -134,12 +141,12 @@ for name, source, idx in zip(all_asset_names, asset_sources, asset_idxs):
 # ----- 8. Portfolio Construction -----
 if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     prices_df = pd.DataFrame()
-    for (t, df), source, idx in zip(
+    # Ordered by asset_keys (which are unique and used everywhere)
+    for (t, df), source in zip(
         st.session_state["downloaded_dfs"] + st.session_state["uploaded_dfs"],
-        ["downloaded"]*len(st.session_state["downloaded_dfs"]) + ["uploaded"]*len(st.session_state["uploaded_dfs"]),
-        list(range(len(st.session_state["downloaded_dfs"]))) + list(range(len(st.session_state["uploaded_dfs"])))
+        ["downloaded"]*len(st.session_state["downloaded_dfs"]) + ["uploaded"]*len(st.session_state["uploaded_dfs"])
     ):
-        asset_key = f"{source}_{t}_{idx}"
+        asset_key = f"{source}_{t}"
         df = df.dropna(subset=['Date', 'Price'])
         df = df[['Date', 'Price']].set_index('Date')
         df.columns = [asset_key]
@@ -150,14 +157,16 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
 
     # مسیر بیمه‌شده
     adjusted_prices_df = prices_df.copy()
-    for asset_key, info in st.session_state["insured_assets"].items():
-        S = prices_df[asset_key]
-        strike = info['strike']
-        premium = info['premium']
-        amount = info['amount']
-        put_profit = np.maximum(strike - S, 0) * amount - premium * amount
-        insured_price = S + put_profit
-        adjusted_prices_df[asset_key] = insured_price
+    for asset_key in prices_df.columns:
+        if asset_key in st.session_state["insured_assets"]:
+            info = st.session_state["insured_assets"][asset_key]
+            S = prices_df[asset_key]
+            strike = info['strike']
+            premium = info['premium']
+            amount = info['amount']
+            put_profit = np.maximum(strike - S, 0) * amount - premium * amount
+            insured_price = S + put_profit
+            adjusted_prices_df[asset_key] = insured_price
 
     # ---------- Portfolio Analytics (Monte Carlo & CVaR) ----------
     resample_rule = 'M'
@@ -227,56 +236,58 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
 
     # ---------- Married Put Chart ----------
     st.subheader("📉 بیمه دارایی‌ها (Married Put) با نقطه سر به سر")
-    for asset_key, info in st.session_state["insured_assets"].items():
-        spot = info['spot']
-        strike = info['strike']
-        premium = info['premium']
-        amount = info['amount']
-        base = info['base']
-        name = info['name']
-        x = np.linspace(spot * 0.5, spot * 1.5, 201)
-        asset_pnl = (x - spot) * base
-        put_pnl = np.where(x < strike, (strike - x) * amount, 0) - premium * amount
-        total_pnl = asset_pnl + put_pnl
-        percent_pnl = total_pnl / (spot * base) * 100
-        cross_idx = np.where(np.diff(np.sign(total_pnl)) != 0)[0]
-        break_even_idx = cross_idx[0] + 1 if len(cross_idx) > 0 else np.abs(total_pnl).argmin()
-        break_even_price = x[break_even_idx]
-        colors = np.where(total_pnl >= 0, 'green', 'red')
-        fig2 = go.Figure()
-        fig2.add_trace(go.Bar(
-            x=x,
-            y=total_pnl,
-            marker_color=colors,
-            hovertemplate=
-                'قیمت دارایی: %{x:,.0f}<br>' +
-                'سود/زیان کل: %{y:,.0f}<br>' +
-                'درصد سود/زیان: %{customdata:.2f}%',
-            customdata=percent_pnl,
-            name='سود/زیان کل'
-        ))
-        fig2.add_vline(
-            x=break_even_price,
-            line_dash="dot",
-            line_color="blue",
-            annotation_text=f"Break-even: {break_even_price:,.0f}",
-            annotation_position="top left"
-        )
-        fig2.add_trace(go.Scatter(
-            x=x, y=asset_pnl,
-            mode='lines', name='دارایی پایه', line=dict(dash='dot', color='gray')
-        ))
-        fig2.add_trace(go.Scatter(
-            x=x, y=put_pnl,
-            mode='lines', name='پوت', line=dict(dash='dot', color='blue')
-        ))
-        fig2.update_layout(
-            title=f"Married Put {name} - نقطه سر به سر و درصد سود/زیان",
-            xaxis_title="قیمت دارایی",
-            yaxis_title="سود/زیان",
-            hovermode="x unified"
-        )
-        st.markdown(f"<b>{name}</b>", unsafe_allow_html=True)
-        st.plotly_chart(fig2, use_container_width=True)
+    for asset_key in prices_df.columns:
+        if asset_key in st.session_state["insured_assets"]:
+            info = st.session_state["insured_assets"][asset_key]
+            spot = info['spot']
+            strike = info['strike']
+            premium = info['premium']
+            amount = info['amount']
+            base = info['base']
+            name = info['name']
+            x = np.linspace(spot * 0.5, spot * 1.5, 201)
+            asset_pnl = (x - spot) * base
+            put_pnl = np.where(x < strike, (strike - x) * amount, 0) - premium * amount
+            total_pnl = asset_pnl + put_pnl
+            percent_pnl = total_pnl / (spot * base) * 100
+            cross_idx = np.where(np.diff(np.sign(total_pnl)) != 0)[0]
+            break_even_idx = cross_idx[0] + 1 if len(cross_idx) > 0 else np.abs(total_pnl).argmin()
+            break_even_price = x[break_even_idx]
+            colors = np.where(total_pnl >= 0, 'green', 'red')
+            fig2 = go.Figure()
+            fig2.add_trace(go.Bar(
+                x=x,
+                y=total_pnl,
+                marker_color=colors,
+                hovertemplate=
+                    'قیمت دارایی: %{x:,.0f}<br>' +
+                    'سود/زیان کل: %{y:,.0f}<br>' +
+                    'درصد سود/زیان: %{customdata:.2f}%',
+                customdata=percent_pnl,
+                name='سود/زیان کل'
+            ))
+            fig2.add_vline(
+                x=break_even_price,
+                line_dash="dot",
+                line_color="blue",
+                annotation_text=f"Break-even: {break_even_price:,.0f}",
+                annotation_position="top left"
+            )
+            fig2.add_trace(go.Scatter(
+                x=x, y=asset_pnl,
+                mode='lines', name='دارایی پایه', line=dict(dash='dot', color='gray')
+            ))
+            fig2.add_trace(go.Scatter(
+                x=x, y=put_pnl,
+                mode='lines', name='پوت', line=dict(dash='dot', color='blue')
+            ))
+            fig2.update_layout(
+                title=f"Married Put {name} - نقطه سر به سر و درصد سود/زیان",
+                xaxis_title="قیمت دارایی",
+                yaxis_title="سود/زیان",
+                hovermode="x unified"
+            )
+            st.markdown(f"<b>{name}</b>", unsafe_allow_html=True)
+            st.plotly_chart(fig2, use_container_width=True)
 else:
     st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price یا Close یا Open را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
