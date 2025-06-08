@@ -3,8 +3,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-def run_portfolio_analysis(prices_df, asset_names, investment_amount):
-    # پارامترهای ساده‌شده
+def run_portfolio_analysis(prices_df, asset_names, st):
     resample_rule = "M"
     annual_factor = 12
 
@@ -28,11 +27,9 @@ def run_portfolio_analysis(prices_df, asset_names, investment_amount):
         results[2, i] = sharpe_ratio
         results[3:, i] = weights
 
-    # سبک‌های مختلف: مونت‌کارلو، CVaR، MPT
     best_idx = np.argmax(results[2])  # بیشینه شارپ (MPT)
     best_weights = results[3:, np.random.randint(0, n_portfolios)]  # مونت‌کارلو رندوم
     best_cvar_weights = results[3:, np.argmin(results[1])]  # کمترین ریسک (نمونه‌ای برای CVaR)
-
     mpt_weights = results[3:, best_idx]
     ef_results = (results[1], results[0], results[2])
 
@@ -45,7 +42,29 @@ def run_portfolio_analysis(prices_df, asset_names, investment_amount):
         "mean_returns": mean_returns
     }
 
-def plot_pie_charts(analysis, asset_names, investment_amount):
+def show_weights(analysis, asset_names, st):
+    st.markdown("### 💰 ترکیب سرمایه‌گذاری هر سبک (درصد و دلار)")
+    investment_amount = st.session_state["investment_amount"]
+    for label, weights in [
+        ("پرتفو بهینه مونت‌کارلو", analysis["best_weights"]),
+        ("پرتفو بهینه CVaR (95%)", analysis["best_cvar_weights"]),
+        ("پرتفو بهینه MPT", analysis["mpt_weights"])
+    ]:
+        st.markdown(f"**{label}:**")
+        cols = st.columns(len(asset_names))
+        for i, name in enumerate(asset_names):
+            percent = weights[i]
+            dollar = percent * investment_amount
+            with cols[i]:
+                st.markdown(f"""
+                <div style='text-align:center;direction:rtl'>
+                <b>{name}</b><br>
+                {percent*100:.3f}%<br>
+                {dollar:.3f} دلار
+                </div>
+                """, unsafe_allow_html=True)
+
+def plot_pie_charts(analysis, asset_names, st):
     styles = [
         ("پرتفو مونت‌کارلو", analysis["best_weights"]),
         ("پرتفو CVaR", analysis["best_cvar_weights"]),
@@ -59,10 +78,18 @@ def plot_pie_charts(analysis, asset_names, investment_amount):
             )
             st.plotly_chart(pie_fig, use_container_width=True)
             st.markdown(f"<b>{label}</b>", unsafe_allow_html=True)
-            for asset, w in zip(asset_names, weights):
-                st.markdown(f"{asset}: {w*100:.2f}% ({investment_amount*w:.2f} $)")
 
-def plot_efficient_frontiers(analysis, asset_names):
+def show_dashboard(analysis, st):
+    st.markdown("### 📋 داشبورد خلاصه پرتفو")
+    investment_amount = st.session_state["investment_amount"]
+    # فرض کن توابع risk_return رو داری و ... (مثل app.py v3)
+    st.write("اینجا جدول بازده و ریسک و مقادیر کلیدی هر سبک را نمایش بده...")
+
+def show_risk_return_details(analysis, st):
+    st.markdown("### 📋 جزئیات ریسک و بازده هر سبک")
+    st.write("اینجا جزییات ریسک و بازده هر سبک را نمایش بده...")
+
+def plot_efficient_frontier(analysis, asset_names, st):
     ef_results = analysis["ef_results"]
     stds, rets, sharpes = ef_results[0], ef_results[1], ef_results[2]
     fig = go.Figure()
@@ -71,7 +98,6 @@ def plot_efficient_frontiers(analysis, asset_names):
         marker=dict(color=sharpes, colorscale='Viridis', showscale=True),
         name='مرز کارا'
     ))
-    # مارکر پرتفوهای منتخب
     for label, weights in [
         ("مونت‌کارلو", analysis["best_weights"]),
         ("CVaR", analysis["best_cvar_weights"]),
@@ -90,56 +116,3 @@ def plot_efficient_frontiers(analysis, asset_names):
         title="Efficient Frontier (مرز کارا)"
     )
     st.plotly_chart(fig, use_container_width=True)
-
-def plot_mpt_efficient_frontier(analysis, asset_names):
-    ef_results = analysis["ef_results"]
-    stds, rets, sharpes = ef_results[0], ef_results[1], ef_results[2]
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=stds, y=rets, mode='lines+markers',
-        line=dict(color='blue', width=2), name='مرز کارا MPT'
-    ))
-    idx_max_sharpe = np.argmax(sharpes)
-    fig.add_trace(go.Scatter(
-        x=[stds[idx_max_sharpe]], y=[rets[idx_max_sharpe]],
-        mode="markers+text", marker=dict(size=16, color='red'),
-        text=["بیشینه شارپ"], textposition="top center", name="بیشینه شارپ"
-    ))
-    fig.update_layout(
-        xaxis_title="ریسک سالانه", yaxis_title="بازده سالانه",
-        title="Efficient Frontier ویژه MPT"
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-def price_forecast_section(prices_df, asset_names):
-    import warnings
-    warnings.filterwarnings('ignore')
-    try:
-        from statsmodels.tsa.arima.model import ARIMA
-    except ImportError:
-        st.warning("پیش‌بینی قیمت نیاز به statsmodels دارد. با دستور pip install statsmodels نصب کنید.")
-        return
-    steps = st.slider("تعداد ماه پیش‌بینی", 3, 36, 12)
-    cols = st.columns(len(asset_names))
-    for i, name in enumerate(asset_names):
-        with cols[i]:
-            ts = prices_df[name].resample("M").last().dropna()
-            if len(ts) < 15:
-                st.warning(f"تاریخچه {name} کوتاه است!")
-                continue
-            model = ARIMA(ts, order=(1,1,1))
-            fit = model.fit()
-            pred = fit.get_forecast(steps=steps)
-            forecast = pred.predicted_mean
-            ci = pred.conf_int()
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=ts.index, y=ts, mode="lines", name="تاریخی"))
-            fig.add_trace(go.Scatter(x=forecast.index, y=forecast, mode="lines", name="پیش‌بینی"))
-            fig.add_trace(go.Scatter(
-                x=forecast.index.tolist()+forecast.index[::-1].tolist(),
-                y=ci.iloc[:,0].tolist()+ci.iloc[:,1].tolist()[::-1],
-                fill="toself", fillcolor="rgba(0,100,200,0.2)", line=dict(color="rgba(255,255,255,0)"),
-                showlegend=False, name="بازه اطمینان"
-            ))
-            fig.update_layout(title=f"پیش‌بینی قیمت آینده {name}", xaxis_title="تاریخ", yaxis_title="قیمت")
-            st.plotly_chart(fig, use_container_width=True)
