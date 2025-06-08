@@ -1,4 +1,5 @@
 import pandas as pd
+import streamlit as st
 
 def read_csv_file(file):
     try:
@@ -42,12 +43,10 @@ def read_csv_file(file):
             raise Exception("پس از تبدیل نوع داده، داده معتبری باقی نماند.")
         return df
     except Exception as e:
-        import streamlit as st
         st.error(f"خطا در خواندن فایل {file.name}: {e}")
         return None
 
 def get_price_dataframe_from_yf(data, t):
-    import pandas as pd
     if isinstance(data.columns, pd.MultiIndex):
         if t in data.columns.levels[0]:
             df_t = data[t].reset_index()
