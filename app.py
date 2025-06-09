@@ -114,32 +114,7 @@ def calculate_max_drawdown(prices: pd.Series) -> float:
     return max_dd
 
 # =========================
-# 6. محاسبه مرز کارا (Efficient Frontier) مارکویتز
-# =========================
-def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200, min_weights=None, max_weights=None):
-    num_assets = len(mean_returns)
-    results = np.zeros((3, points))
-    weight_record = []
-    for i in range(points):
-        while True:
-            weights = np.random.dirichlet(np.ones(num_assets), size=1)[0]
-            if min_weights is not None:
-                weights = np.maximum(weights, min_weights)
-            if max_weights is not None:
-                weights = np.minimum(weights, max_weights)
-            weights /= np.sum(weights)
-            if (min_weights is None or np.all(weights >= min_weights)) and (max_weights is None or np.all(weights <= max_weights)):
-                break
-        port_return = np.dot(weights, mean_returns)
-        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-        results[0, i] = port_std
-        results[1, i] = port_return
-        results[2, i] = (port_return) / port_std if port_std > 0 else 0
-        weight_record.append(weights)
-    return results, np.array(weight_record)
-
-# =========================
-# 7. نمایش بازده و ریسک پرتفوی در بازه های مختلف
+# 6. نمایش بازده و ریسک پرتفوی در بازه های مختلف
 # =========================
 def show_periodic_risk_return(resampled_prices, weights, label):
     pf_prices = (resampled_prices * weights).sum(axis=1)
@@ -164,6 +139,31 @@ def show_periodic_risk_return(resampled_prices, weights, label):
     """, unsafe_allow_html=True)
 
 # =========================
+# 7. Efficient Frontier با محدودیت وزن
+# =========================
+def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200, min_weights=None, max_weights=None):
+    num_assets = len(mean_returns)
+    results = np.zeros((3, points))
+    weight_record = []
+    for i in range(points):
+        while True:
+            weights = np.random.dirichlet(np.ones(num_assets), size=1)[0]
+            if min_weights is not None:
+                weights = np.maximum(weights, min_weights)
+            if max_weights is not None:
+                weights = np.minimum(weights, max_weights)
+            weights /= np.sum(weights)
+            if (min_weights is None or np.all(weights >= min_weights)) and (max_weights is None or np.all(weights <= max_weights)):
+                break
+        port_return = np.dot(weights, mean_returns)
+        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        results[0, i] = port_std
+        results[1, i] = port_return
+        results[2, i] = (port_return) / port_std if port_std > 0 else 0
+        weight_record.append(weights)
+    return results, np.array(weight_record)
+
+# =========================
 # 8. توضیحات ابزار (راهنما)
 # =========================
 st.markdown("""
@@ -174,7 +174,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================
-# 9. بارگذاری و حذف دارایی‌های دانلودی و آپلودی
+# 9. بارگذاری و حذف دارایی‌ها
 # =========================
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
@@ -192,8 +192,6 @@ if st.session_state["downloaded_dfs"]:
             if st.button("❌", key=f"delete_dl_{t}_{idx}"):
                 st.session_state["downloaded_dfs"].pop(idx)
                 st.experimental_rerun()
-
-# حذف دارایی آپلودی از لیست
 if st.session_state["uploaded_dfs"]:
     st.sidebar.markdown("<b>حذف دارایی‌های آپلود شده:</b>", unsafe_allow_html=True)
     for idx, (t, df) in enumerate(st.session_state["uploaded_dfs"]):
@@ -206,20 +204,18 @@ if st.session_state["uploaded_dfs"]:
                 st.experimental_rerun()
 
 # =========================
-# 10. انتخاب پارامترها (بازه، ریسک، CVaR و ...)
+# 10. پارامترها و نرخ بدون ریسک
 # =========================
 period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
 resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'شش‌ماهه': '2Q'}[period]
 annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}[period]
 user_risk = st.sidebar.slider("ریسک هدف پرتفو (انحراف معیار سالانه)", 0.01, 1.0, 0.25, 0.01)
 cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
-
-# اضافه کردن نرخ دارایی بدون ریسک
 st.sidebar.markdown("<hr/>", unsafe_allow_html=True)
 rf_rate = st.sidebar.number_input("نرخ بازده سالانه دارایی بدون ریسک (سپرده/اوراق، درصد)", 0.0, 100.0, 20.0, 0.1) / 100
 
 # =========================
-# 11. دانلود داده آنلاین یاهو و اضافه به session_state
+# 11. دانلود داده آنلاین یاهو
 # =========================
 with st.sidebar.expander("📥 دانلود داده آنلاین از Yahoo Finance"):
     st.markdown("""
@@ -234,7 +230,6 @@ with st.sidebar.expander("📥 دانلود داده آنلاین از Yahoo Fin
     start = st.date_input("تاریخ شروع", value=pd.to_datetime("2023-01-01"))
     end = st.date_input("تاریخ پایان", value=pd.to_datetime("today"))
     download_btn = st.button("دریافت داده آنلاین")
-
 if download_btn and tickers_input.strip():
     tickers = [t.strip() for t in tickers_input.strip().split(",") if t.strip()]
     try:
@@ -257,7 +252,7 @@ if download_btn and tickers_input.strip():
         st.error(f"خطا در دریافت داده: {ex}")
 
 # =========================
-# 12. آپلود فایل csv و افزودن به لیست دارایی‌ها
+# 12. آپلود فایل csv
 # =========================
 if uploaded_files:
     for file in uploaded_files:
@@ -277,9 +272,6 @@ for name in all_asset_names:
         <div dir="rtl" style="text-align: right;">
         <b>Married Put چیست؟</b>
         <br>بیمه در پرتفو (Married Put) یعنی شما همزمان با نگهداری دارایی، یک قرارداد اختیار فروش (Put Option) برای همان دارایی دارید تا در ریزش شدید، ضرر شما محدود شود.
-        <br><b>اگر بیمه نگیرید:</b> در صورت ریزش شدید قیمت، کل ضرر را متحمل می‌شوید و هیچ پوششی ندارید.
-        <br><b>اگر بیمه بگیرید:</b> حتی اگر قیمت دارایی خیلی پایین بیاید، بخش اعظم ضرر شما تا حد strike price جبران می‌شود.
-        <br><b>مثال:</b> فرض کنید بیت‌کوین دارید و Put با قیمت اعمال ۵۰,۰۰۰ دلار خریده‌اید. اگر قیمت بیت‌کوین به ۳۰,۰۰۰ برسد، شما حق فروش با قیمت ۵۰,۰۰۰ را دارید (منهای پرمیوم).
         </div>
         """, unsafe_allow_html=True)
         insured = st.checkbox(f"فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
@@ -302,7 +294,7 @@ for name in all_asset_names:
             st.session_state["insured_assets"].pop(name, None)
 
 # =========================
-# 13.1 ورودی محدودیت وزن هر دارایی
+# 13.1 محدودیت وزن دارایی‌ها
 # =========================
 st.sidebar.markdown("<hr/>", unsafe_allow_html=True)
 st.sidebar.markdown("### محدودیت وزن هر دارایی در پرتفو")
@@ -313,7 +305,7 @@ for name in all_asset_names:
     max_weights[name] = st.sidebar.number_input(f"حداکثر وزن {name} (%)", 0.0, 100.0, 100.0, 1.0) / 100
 
 # =========================
-# 14. تحلیل پرتفوی، محاسبه، نمودارها و توضیحات هر بخش
+# 14. تحلیل پرتفوی و شبیه‌سازی بیمه
 # =========================
 if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     prices_df = pd.DataFrame()
@@ -338,11 +330,6 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         asset_names.append(name)
 
     st.subheader("📉 روند قیمت دارایی‌ها")
-    st.markdown("""
-    <div dir="rtl" style="text-align: right;">
-    این نمودار، روند تاریخی قیمت هر دارایی (asset) را در بازه انتخابی نمایش می‌دهد.
-    </div>
-    """, unsafe_allow_html=True)
     st.line_chart(prices_df.resample(resample_rule).last().dropna())
 
     if prices_df.empty:
@@ -360,51 +347,46 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         asset_names_rf = asset_names + ["بدون ریسک"]
         mean_returns_rf = np.append(mean_returns.values, rf_rate)
         cov_matrix_rf = np.zeros((len(asset_names_rf), len(asset_names_rf)))
-        cov_matrix_rf[:-1, :-1] = cov_matrix.values  # سطر و ستون آخر صفر
+        cov_matrix_rf[:-1, :-1] = cov_matrix.values
 
         # محدودیت‌های وزن
         min_w = np.array([min_weights[n] for n in asset_names] + [0.0])
         max_w = np.array([max_weights[n] for n in asset_names] + [1.0])
 
-        # ====== مونت کارلو با محدودیت و بیمه ======
+        # ====== مونت کارلو با اثر بیمه واقعی ======
         n_portfolios = 3000
         n_mc = 1000
         results = np.zeros((5 + len(asset_names_rf), n_portfolios))
         cvar_results = np.zeros((3 + len(asset_names_rf), n_portfolios))
         np.random.seed(42)
-        downside = returns.copy()
-        downside[downside > 0] = 0
-        adjusted_cov = cov_matrix_rf.copy()
-        preference_weights = np.ones(len(asset_names_rf))  # ساده
-        for i, name in enumerate(asset_names):
-            if name in st.session_state["insured_assets"]:
-                risk_scale = 1 - st.session_state["insured_assets"][name]['loss_percent'] / 100
-                adjusted_cov[i, :] *= risk_scale
-                adjusted_cov[:, i] *= risk_scale
-                preference_weights[i] = 1 / (std_devs[i] * risk_scale**0.7)
-            else:
-                preference_weights[i] = 1 / std_devs[i]
-        preference_weights /= np.sum(preference_weights)
-
         for i in range(n_portfolios):
             # وزن‌ها با محدودیت
             while True:
-                weights = np.random.random(len(asset_names_rf)) * preference_weights
+                weights = np.random.random(len(asset_names_rf))
                 weights = np.maximum(weights, min_w)
                 weights = np.minimum(weights, max_w)
                 weights /= np.sum(weights)
                 if np.all(weights >= min_w) and np.all(weights <= max_w):
                     break
-            # بیمه بر بازده
-            port_return = np.dot(weights, mean_returns_rf)
-            port_std = np.sqrt(np.dot(weights.T, np.dot(adjusted_cov, weights)))
-            downside_risk = np.sqrt(np.dot(weights[:-1].T, np.dot(downside.cov() * annual_factor, weights[:-1])))
-            sharpe_ratio = (port_return - rf_rate) / port_std
-            sortino_ratio = (port_return - rf_rate) / downside_risk if downside_risk > 0 else np.nan
-            # شبیه‌سازی مونت کارلو بازده پرتفو با اثر بیمه روی دارایی‌ها
-            mc_sims = np.random.multivariate_normal(mean_returns_rf/annual_factor, adjusted_cov/annual_factor, n_mc)
-            port_mc_returns = np.dot(mc_sims, weights)
-            # اثر بیمه: CVaR را بهبود می‌دهد (ساده‌سازی)
+
+            # شبیه‌سازی مونت‌کارلو با بیمه
+            sim_returns = np.random.multivariate_normal(mean_returns_rf, cov_matrix_rf, n_mc)
+            # بیمه روی هر دارایی
+            for j, name in enumerate(asset_names):
+                if name in st.session_state["insured_assets"]:
+                    info = st.session_state["insured_assets"][name]
+                    last_price = resampled_prices[name].iloc[-1]
+                    final_prices = last_price * (1 + sim_returns[:, j])
+                    put_pnl = np.maximum(info['strike'] - final_prices, 0) * info['amount'] - info['premium'] * info['amount']
+                    asset_pnl = (final_prices - last_price) * info['base']
+                    total_pnl = asset_pnl + put_pnl
+                    # تبدیل سود به بازده نسبی جدید
+                    sim_returns[:, j] = total_pnl / (last_price * max(info['base'], 1e-8))
+            port_mc_returns = np.dot(sim_returns, weights)
+            port_return = port_mc_returns.mean()
+            port_std = port_mc_returns.std()
+            sharpe_ratio = (port_return - rf_rate) / port_std if port_std > 0 else 0
+            sortino_ratio = (port_return - rf_rate) / (port_mc_returns[port_mc_returns < 0].std() if np.any(port_mc_returns < 0) else 1)
             VaR = np.percentile(port_mc_returns, (1 - cvar_alpha) * 100)
             CVaR = port_mc_returns[port_mc_returns <= VaR].mean() if np.any(port_mc_returns <= VaR) else VaR
             results[0, i] = port_return
@@ -462,7 +444,6 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             textposition="top right",
             name='پرتفوی بهینه'
         ))
-        # خط CAL (Capital Market Line)
         max_sharpe_idx = np.argmax(results[2])
         std_tangent = results[1,max_sharpe_idx]
         ret_tangent = results[0,max_sharpe_idx]
