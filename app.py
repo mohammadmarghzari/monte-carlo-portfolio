@@ -532,6 +532,38 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             st.markdown(f"<b>{name}</b>", unsafe_allow_html=True)
             st.plotly_chart(fig2, use_container_width=True)
 
+        # ====== مقایسه هیستوگرام سود/زیان پرتفو با و بدون بیمه ======
+        st.subheader("📉 مقایسه توزیع سود/زیان پرتفو قبل و بعد از بیمه (شبیه‌سازی ۱۰۰۰۰ مرتبه)")
+        n_sim_hist = 10000
+        sim_returns_noins = np.random.multivariate_normal(mean_returns_rf, cov_matrix_rf, n_sim_hist)
+        port_mc_returns_noins = np.dot(sim_returns_noins, best_weights)
+        cvar_noins = port_mc_returns_noins[port_mc_returns_noins <= np.percentile(port_mc_returns_noins, (1-cvar_alpha)*100)].mean()
+        sim_returns_ins = sim_returns_noins.copy()
+        for j, name in enumerate(asset_names):
+            if name in st.session_state["insured_assets"]:
+                info = st.session_state["insured_assets"][name]
+                last_price = resampled_prices[name].iloc[-1]
+                final_prices = last_price * (1 + sim_returns_ins[:, j])
+                put_pnl = np.maximum(info['strike'] - final_prices, 0) * info['amount'] - info['premium'] * info['amount']
+                asset_pnl = (final_prices - last_price) * info['base']
+                total_pnl = asset_pnl + put_pnl
+                sim_returns_ins[:, j] = total_pnl / (last_price * max(info['base'], 1e-8))
+        port_mc_returns_ins = np.dot(sim_returns_ins, best_weights)
+        cvar_ins = port_mc_returns_ins[port_mc_returns_ins <= np.percentile(port_mc_returns_ins, (1-cvar_alpha)*100)].mean()
+        fig_hist = go.Figure()
+        fig_hist.add_trace(go.Histogram(x=port_mc_returns_noins, nbinsx=50, opacity=0.5, name="بدون بیمه"))
+        fig_hist.add_trace(go.Histogram(x=port_mc_returns_ins, nbinsx=50, opacity=0.5, name="با بیمه"))
+        fig_hist.add_vline(x=cvar_noins, line_dash="dash", line_color="red", annotation_text=f"CVaR بدون بیمه: {cvar_noins:.2%}")
+        fig_hist.add_vline(x=cvar_ins, line_dash="dash", line_color="green", annotation_text=f"CVaR با بیمه: {cvar_ins:.2%}")
+        fig_hist.update_layout(barmode='overlay', title="مقایسه توزیع سود/زیان پرتفو قبل و بعد از بیمه", xaxis_title="بازده شبیه‌سازی‌شده پرتفو", yaxis_title="تعداد")
+        st.plotly_chart(fig_hist, use_container_width=True)
+        st.markdown(f"""
+        <div dir="rtl" style="text-align:right">
+        <b>CVaR بدون بیمه:</b> {cvar_noins:.2%} <br>
+        <b>CVaR با بیمه:</b> {cvar_ins:.2%}
+        </div>
+        """, unsafe_allow_html=True)
+
         st.subheader("🔮 پیش‌بینی قیمت و بازده آتی هر دارایی")
         future_months = 6 if period == 'شش‌ماهه' else (3 if period == 'سه‌ماهه' else 1)
         for i, name in enumerate(asset_names):
@@ -542,7 +574,6 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             n_sim = 500
             for _ in range(n_sim):
                 sim = last_price * np.exp(np.cumsum(np.random.normal(mu, sigma, future_months)))
-                # اعمال بیمه در شبیه‌سازی
                 if name in st.session_state["insured_assets"]:
                     info = st.session_state["insured_assets"][name]
                     final_price = sim[-1]
