@@ -116,17 +116,25 @@ def calculate_max_drawdown(prices: pd.Series) -> float:
 # =========================
 # 6. محاسبه مرز کارا (Efficient Frontier) مارکویتز
 # =========================
-def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200):
+def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200, min_weights=None, max_weights=None):
     num_assets = len(mean_returns)
     results = np.zeros((3, points))
     weight_record = []
     for i in range(points):
-        weights = np.random.dirichlet(np.ones(num_assets), size=1)[0]
+        while True:
+            weights = np.random.dirichlet(np.ones(num_assets), size=1)[0]
+            if min_weights is not None:
+                weights = np.maximum(weights, min_weights)
+            if max_weights is not None:
+                weights = np.minimum(weights, max_weights)
+            weights /= np.sum(weights)
+            if (min_weights is None or np.all(weights >= min_weights)) and (max_weights is None or np.all(weights <= max_weights)):
+                break
         port_return = np.dot(weights, mean_returns)
         port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-        results[0,i] = port_std
-        results[1,i] = port_return
-        results[2,i] = (port_return) / port_std if port_std > 0 else 0
+        results[0, i] = port_std
+        results[1, i] = port_return
+        results[2, i] = (port_return) / port_std if port_std > 0 else 0
         weight_record.append(weights)
     return results, np.array(weight_record)
 
@@ -161,7 +169,7 @@ def show_periodic_risk_return(resampled_prices, weights, label):
 st.markdown("""
 <div dir="rtl" style="text-align: right;">
 <h3>ابزار تحلیل پرتفو: توضیحات کلی</h3>
-این ابزار برای تحلیل و بهینه‌سازی ترکیب دارایی‌های یک پرتفو (Portfolio) طراحی شده است...
+این ابزار برای تحلیل و بهینه‌سازی ترکیب دارایی‌های یک پرتفو (Portfolio) با قابلیت‌های حرفه‌ای شبیه‌سازی مونت‌کارلو، بیمه و محدودیت‌های سفارشی طراحی شده است.
 </div>
 """, unsafe_allow_html=True)
 
@@ -205,6 +213,10 @@ resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'شش‌ماهه':
 annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}[period]
 user_risk = st.sidebar.slider("ریسک هدف پرتفو (انحراف معیار سالانه)", 0.01, 1.0, 0.25, 0.01)
 cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
+
+# اضافه کردن نرخ دارایی بدون ریسک
+st.sidebar.markdown("<hr/>", unsafe_allow_html=True)
+rf_rate = st.sidebar.number_input("نرخ بازده سالانه دارایی بدون ریسک (سپرده/اوراق، درصد)", 0.0, 100.0, 20.0, 0.1) / 100
 
 # =========================
 # 11. دانلود داده آنلاین یاهو و اضافه به session_state
@@ -264,10 +276,10 @@ for name in all_asset_names:
         st.markdown("""
         <div dir="rtl" style="text-align: right;">
         <b>Married Put چیست؟</b>
-        <br>بیمه در پرتفو (Married Put) یعنی شما همزمان با نگهداری دارایی، یک قرارداد اختیار فروش (Put Option) برای همان دارایی می‌خرید. اگر قیمت دارایی به شدت سقوط کند، این قرارداد از شما محافظت می‌کند و ضرر شما را محدود می‌سازد.
+        <br>بیمه در پرتفو (Married Put) یعنی شما همزمان با نگهداری دارایی، یک قرارداد اختیار فروش (Put Option) برای همان دارایی دارید تا در ریزش شدید، ضرر شما محدود شود.
         <br><b>اگر بیمه نگیرید:</b> در صورت ریزش شدید قیمت، کل ضرر را متحمل می‌شوید و هیچ پوششی ندارید.
         <br><b>اگر بیمه بگیرید:</b> حتی اگر قیمت دارایی خیلی پایین بیاید، بخش اعظم ضرر شما تا حد strike price جبران می‌شود.
-        <br><b>مثال:</b> فرض کنید بیت‌کوین دارید و Put با قیمت اعمال ۵۰,۰۰۰ دلار خریده‌اید. اگر قیمت بیت‌کوین به ۳۰,۰۰۰ برسد، ضرر شما نسبت به کسی که بیمه ندارد بسیار کمتر می‌شود.
+        <br><b>مثال:</b> فرض کنید بیت‌کوین دارید و Put با قیمت اعمال ۵۰,۰۰۰ دلار خریده‌اید. اگر قیمت بیت‌کوین به ۳۰,۰۰۰ برسد، شما حق فروش با قیمت ۵۰,۰۰۰ را دارید (منهای پرمیوم).
         </div>
         """, unsafe_allow_html=True)
         insured = st.checkbox(f"فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
@@ -288,6 +300,17 @@ for name in all_asset_names:
             }
         else:
             st.session_state["insured_assets"].pop(name, None)
+
+# =========================
+# 13.1 ورودی محدودیت وزن هر دارایی
+# =========================
+st.sidebar.markdown("<hr/>", unsafe_allow_html=True)
+st.sidebar.markdown("### محدودیت وزن هر دارایی در پرتفو")
+min_weights = {}
+max_weights = {}
+for name in all_asset_names:
+    min_weights[name] = st.sidebar.number_input(f"حداقل وزن {name} (%)", 0.0, 100.0, 0.0, 1.0) / 100
+    max_weights[name] = st.sidebar.number_input(f"حداکثر وزن {name} (%)", 0.0, 100.0, 100.0, 1.0) / 100
 
 # =========================
 # 14. تحلیل پرتفوی، محاسبه، نمودارها و توضیحات هر بخش
@@ -317,8 +340,7 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     st.subheader("📉 روند قیمت دارایی‌ها")
     st.markdown("""
     <div dir="rtl" style="text-align: right;">
-    این نمودار، روند تاریخی قیمت هر دارایی (asset) را در بازه انتخابی نمایش می‌دهد. این به شما کمک می‌کند نوسانات و روند کلی هر دارایی را ببینید.<br>
-    اگر بین اعداد انگلیسی و فارسی یا نماد انگلیسی و فارسی فاصله بیفتد، نمایش داده اصلاح می‌شود.
+    این نمودار، روند تاریخی قیمت هر دارایی (asset) را در بازه انتخابی نمایش می‌دهد.
     </div>
     """, unsafe_allow_html=True)
     st.line_chart(prices_df.resample(resample_rule).last().dropna())
@@ -334,50 +356,55 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         cov_matrix = returns.cov() * annual_factor
         std_devs = np.sqrt(np.diag(cov_matrix))
 
-        # توضیح سبک های پرتفوی و ...
-        st.subheader("📚 سبک‌های بهینه‌سازی پرتفو (Portfolio Optimization Styles)")
-        st.markdown("""
-        <div dir="rtl" style="text-align: right;">
-        <ul>
-        <li><b>مونت‌کارلو (Monte Carlo):</b> با شبیه‌سازی تصادفی هزاران ترکیب وزنی، پرتفوهایی با ریسک و بازده مختلف تولید می‌شود و بهترین‌ها انتخاب می‌شوند.</li>
-        <li><b>CVaR:</b> پرتفوهایی که کمترین ریسک بحران (زیان شدید) را دارند، با معیار CVaR (Conditional Value at Risk) بهینه می‌شوند.</li>
-        <li><b>مرز کارا (Efficient Frontier):</b> این سبک بر اساس نظریه مارکویتز (Markowitz) است و بهترین ترکیب دارایی‌ها با حداکثر بازده نسبت به ریسک را پیدا می‌کند.</li>
-        </ul>
-        اگر در جمله بین نام سبک انگلیسی و کلمات فارسی فاصله بیفتد، نمایش صحیح خواهد بود.
-        </div>
-        """, unsafe_allow_html=True)
+        # ====== افزودن دارایی بدون ریسک ======
+        asset_names_rf = asset_names + ["بدون ریسک"]
+        mean_returns_rf = np.append(mean_returns.values, rf_rate)
+        cov_matrix_rf = np.zeros((len(asset_names_rf), len(asset_names_rf)))
+        cov_matrix_rf[:-1, :-1] = cov_matrix.values  # سطر و ستون آخر صفر
 
-        # مونت کارلو و CVaR و مابقی تحلیل‌ها (عین قبل)
+        # محدودیت‌های وزن
+        min_w = np.array([min_weights[n] for n in asset_names] + [0.0])
+        max_w = np.array([max_weights[n] for n in asset_names] + [1.0])
+
+        # ====== مونت کارلو با محدودیت و بیمه ======
         n_portfolios = 3000
         n_mc = 1000
-        results = np.zeros((5 + len(asset_names), n_portfolios))
-        cvar_results = np.zeros((3 + len(asset_names), n_portfolios))
+        results = np.zeros((5 + len(asset_names_rf), n_portfolios))
+        cvar_results = np.zeros((3 + len(asset_names_rf), n_portfolios))
         np.random.seed(42)
-        rf = 0
         downside = returns.copy()
         downside[downside > 0] = 0
-        adjusted_cov = cov_matrix.copy()
-        preference_weights = []
+        adjusted_cov = cov_matrix_rf.copy()
+        preference_weights = np.ones(len(asset_names_rf))  # ساده
         for i, name in enumerate(asset_names):
             if name in st.session_state["insured_assets"]:
                 risk_scale = 1 - st.session_state["insured_assets"][name]['loss_percent'] / 100
-                adjusted_cov.iloc[i, :] *= risk_scale
-                adjusted_cov.iloc[:, i] *= risk_scale
-                preference_weights.append(1 / (std_devs[i] * risk_scale**0.7))
+                adjusted_cov[i, :] *= risk_scale
+                adjusted_cov[:, i] *= risk_scale
+                preference_weights[i] = 1 / (std_devs[i] * risk_scale**0.7)
             else:
-                preference_weights.append(1 / std_devs[i])
-        preference_weights = np.array(preference_weights)
+                preference_weights[i] = 1 / std_devs[i]
         preference_weights /= np.sum(preference_weights)
+
         for i in range(n_portfolios):
-            weights = np.random.random(len(asset_names)) * preference_weights
-            weights /= np.sum(weights)
-            port_return = np.dot(weights, mean_returns)
+            # وزن‌ها با محدودیت
+            while True:
+                weights = np.random.random(len(asset_names_rf)) * preference_weights
+                weights = np.maximum(weights, min_w)
+                weights = np.minimum(weights, max_w)
+                weights /= np.sum(weights)
+                if np.all(weights >= min_w) and np.all(weights <= max_w):
+                    break
+            # بیمه بر بازده
+            port_return = np.dot(weights, mean_returns_rf)
             port_std = np.sqrt(np.dot(weights.T, np.dot(adjusted_cov, weights)))
-            downside_risk = np.sqrt(np.dot(weights.T, np.dot(downside.cov() * annual_factor, weights)))
-            sharpe_ratio = (port_return - rf) / port_std
-            sortino_ratio = (port_return - rf) / downside_risk if downside_risk > 0 else np.nan
-            mc_sims = np.random.multivariate_normal(mean_returns/annual_factor, adjusted_cov/annual_factor, n_mc)
+            downside_risk = np.sqrt(np.dot(weights[:-1].T, np.dot(downside.cov() * annual_factor, weights[:-1])))
+            sharpe_ratio = (port_return - rf_rate) / port_std
+            sortino_ratio = (port_return - rf_rate) / downside_risk if downside_risk > 0 else np.nan
+            # شبیه‌سازی مونت کارلو بازده پرتفو با اثر بیمه روی دارایی‌ها
+            mc_sims = np.random.multivariate_normal(mean_returns_rf/annual_factor, adjusted_cov/annual_factor, n_mc)
             port_mc_returns = np.dot(mc_sims, weights)
+            # اثر بیمه: CVaR را بهبود می‌دهد (ساده‌سازی)
             VaR = np.percentile(port_mc_returns, (1 - cvar_alpha) * 100)
             CVaR = port_mc_returns[port_mc_returns <= VaR].mean() if np.any(port_mc_returns <= VaR) else VaR
             results[0, i] = port_return
@@ -397,20 +424,21 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         best_cvar_weights = results[5:, best_cvar_idx]
 
         st.subheader("📊 داشبورد خلاصه پرتفو")
-        show_periodic_risk_return(resampled_prices, best_weights, "پرتفو بهینه مونت‌کارلو")
-        show_periodic_risk_return(resampled_prices, best_cvar_weights, f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)")
+        show_periodic_risk_return(resampled_prices, best_weights[:-1], "پرتفو بهینه مونت‌کارلو")
+        show_periodic_risk_return(resampled_prices, best_cvar_weights[:-1], f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)")
 
         fig_pie = go.Figure(data=[
-            go.Pie(labels=asset_names, values=best_weights * 100, hole=.5, textinfo='label+percent')
+            go.Pie(labels=asset_names_rf, values=best_weights * 100, hole=.5, textinfo='label+percent')
         ])
         fig_pie.update_layout(title="توزیع وزنی پرتفو بهینه (Monte Carlo)")
         st.plotly_chart(fig_pie, use_container_width=True)
         fig_pie_cvar = go.Figure(data=[
-            go.Pie(labels=asset_names, values=best_cvar_weights * 100, hole=.5, textinfo='label+percent')
+            go.Pie(labels=asset_names_rf, values=best_cvar_weights * 100, hole=.5, textinfo='label+percent')
         ])
         fig_pie_cvar.update_layout(title=f"توزیع وزنی پرتفو بهینه بر اساس CVaR ({int(cvar_alpha*100)}%)")
         st.plotly_chart(fig_pie_cvar, use_container_width=True)
 
+        # ====== رسم نمودار ریسک-بازده و خط بازار سرمایه (CAL) ======
         fig_mc = go.Figure()
         fig_mc.add_trace(
             go.Scatter(
@@ -433,6 +461,14 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             text=["بهینه"],
             textposition="top right",
             name='پرتفوی بهینه'
+        ))
+        # خط CAL (Capital Market Line)
+        max_sharpe_idx = np.argmax(results[2])
+        std_tangent = results[1,max_sharpe_idx]
+        ret_tangent = results[0,max_sharpe_idx]
+        fig_mc.add_trace(go.Scatter(
+            x=[0, std_tangent*100], y=[rf_rate*100, ret_tangent*100],
+            mode='lines', name='خط بازار سرمایه (CAL)', line=dict(color='red', dash='dash')
         ))
         fig_mc.update_layout(title="نمودار ریسک-بازده پرتفوهای Monte Carlo", xaxis_title="ریسک (%)", yaxis_title="بازده (%)")
         st.plotly_chart(fig_mc, use_container_width=True)
@@ -463,9 +499,11 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         fig_cvar.update_layout(title=f"نمودار ریسک-بازده پرتفوها با رنگ CVaR ({int(cvar_alpha*100)}%)", xaxis_title="ریسک (%)", yaxis_title="بازده (%)")
         st.plotly_chart(fig_cvar, use_container_width=True)
 
-        ef_results, ef_weights = efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200)
-        max_sharpe_idx = np.argmax(ef_results[2])
-        mpt_weights = ef_weights[max_sharpe_idx]
+        ef_results, ef_weights = efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200,
+                                                    min_weights=np.array([min_weights[n] for n in asset_names]),
+                                                    max_weights=np.array([max_weights[n] for n in asset_names]))
+        max_sharpe_idx_ef = np.argmax(ef_results[2])
+        mpt_weights = ef_weights[max_sharpe_idx_ef]
         fig_ef = go.Figure()
         fig_ef.add_trace(go.Scatter(
             x=ef_results[0]*100, y=ef_results[1]*100,
@@ -473,7 +511,7 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             name='مرز کارا'
         ))
         fig_ef.add_trace(go.Scatter(
-            x=[ef_results[0, max_sharpe_idx]*100], y=[ef_results[1, max_sharpe_idx]*100],
+            x=[ef_results[0, max_sharpe_idx_ef]*100], y=[ef_results[1, max_sharpe_idx_ef]*100],
             mode='markers+text', marker=dict(size=14, color='red', symbol='star'),
             text=["پرتفوی بهینه MPT"], textposition="top right",
             name='پرتفوی MPT'
@@ -482,8 +520,8 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
 
         st.subheader("🔻 بیشینه افت سرمایه (Max Drawdown) پرتفو")
         for label, w in [
-            ("پرتفو بهینه مونت‌کارلو", best_weights),
-            (f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)", best_cvar_weights),
+            ("پرتفو بهینه مونت‌کارلو", best_weights[:-1]),
+            (f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)", best_cvar_weights[:-1]),
             ("پرتفو بهینه MPT", mpt_weights),
         ]:
             pf_prices = (resampled_prices * w).sum(axis=1)
@@ -523,6 +561,13 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             n_sim = 500
             for _ in range(n_sim):
                 sim = last_price * np.exp(np.cumsum(np.random.normal(mu, sigma, future_months)))
+                # اعمال بیمه در شبیه‌سازی
+                if name in st.session_state["insured_assets"]:
+                    info = st.session_state["insured_assets"][name]
+                    final_price = sim[-1]
+                    put_profit = max(info['strike'] - final_price, 0) * info['amount'] - info['premium'] * info['amount']
+                    asset_pnl = (final_price - last_price)
+                    sim[-1] = last_price + asset_pnl + put_profit / (info['base']+1e-8)
                 sim_prices.append(sim[-1])
             sim_prices = np.array(sim_prices)
             future_price_mean = np.mean(sim_prices)
