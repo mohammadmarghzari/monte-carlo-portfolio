@@ -4,6 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import yfinance as yf
+from collections import Counter
 
 # ========= Session state =========
 if "uploaded_dfs" not in st.session_state:
@@ -81,178 +82,187 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ========= پردازش دیتافریم قیمت =========
+# ========= پردازش دیتافریم قیمت (رفع خطای ستون تکراری) =========
 all_dfs = st.session_state["downloaded_dfs"] + st.session_state["uploaded_dfs"]
-if all_dfs:
-    prices_df = pd.DataFrame()
-    asset_names = []
-    for t, df in all_dfs:
-        prices_df = df.rename(columns={"Price": t}) if prices_df.empty else prices_df.join(df.rename(columns={"Price": t}), how="inner")
-        asset_names.append(t)
-    prices_df = prices_df.dropna()
-    st.subheader("📉 روند قیمت دارایی‌ها")
-    st.line_chart(prices_df)
+name_counter = Counter()
+df_list = []
+asset_names = []
 
-    # بازده و کوواریانس
-    returns = prices_df.pct_change().dropna()
-    mean_returns = returns.mean() * 12
-    cov_matrix = returns.cov() * 12
+for t, df in all_dfs:
+    base_name = t
+    name_counter[base_name] += 1
+    name = base_name if name_counter[base_name] == 1 else f"{base_name} ({name_counter[base_name]})"
+    temp_df = df.copy()
+    temp_df = temp_df.rename(columns={"Price": name})
+    asset_names.append(name)
+    df_list.append(temp_df[[name]])
 
-    # ========= اثر بیمه روی کوواریانس =========
-    cov_adj = cov_matrix.copy()
-    for idx, name in enumerate(asset_names):
-        if name in st.session_state["insured_assets"]:
-            cov_adj.iloc[idx, idx] *= 0.2
-            cov_adj.iloc[idx, :] *= 0.5
-            cov_adj.iloc[:, idx] *= 0.5
-            cov_adj.iloc[idx, idx] *= 0.8
+if len(df_list) == 0:
+    st.error("هیچ دیتافریمی برای پردازش وجود ندارد.")
+    st.stop()
 
-    # ========= Efficient Frontier =========
-    def efficient_frontier(mean_returns, cov_matrix, points=200, min_weights=None, max_weights=None):
-        num_assets = len(mean_returns)
-        results = np.zeros((3, points))
-        weight_record = []
-        for i in range(points):
-            while True:
-                weights = np.random.dirichlet(np.ones(num_assets), size=1)[0]
-                if min_weights is not None:
-                    weights = np.maximum(weights, min_weights)
-                if max_weights is not None:
-                    weights = np.minimum(weights, max_weights)
-                weights /= np.sum(weights)
-                if (min_weights is None or np.all(weights >= min_weights)) and (max_weights is None or np.all(weights <= max_weights)):
-                    break
-            port_return = np.dot(weights, mean_returns)
-            port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-            results[0, i] = port_std
-            results[1, i] = port_return
-            results[2, i] = (port_return) / port_std if port_std > 0 else 0
-            weight_record.append(weights)
-        return results, np.array(weight_record)
+prices_df = pd.concat(df_list, axis=1, join="inner")
 
-    # ========= مرز کارا (MPT) =========
-    ef_results, ef_weights = efficient_frontier(
-        mean_returns, cov_adj, points=300,
-        min_weights=np.array([min_weights[n] for n in asset_names]),
-        max_weights=np.array([max_weights[n] for n in asset_names])
-    )
-    max_sharpe_idx = np.argmax(ef_results[2])
-    mpt_weights = ef_weights[max_sharpe_idx]
-    pf_prices_mpt = (prices_df * mpt_weights).sum(axis=1)
-    pf_returns_mpt = pf_prices_mpt.pct_change().dropna()
-    mean_ann_mpt = pf_returns_mpt.mean() * 12
-    risk_ann_mpt = pf_returns_mpt.std() * np.sqrt(12)
+st.subheader("📉 روند قیمت دارایی‌ها")
+st.line_chart(prices_df)
 
-    # ========= پرتفو مونت‌کارلو و CVaR =========
-    points = 5000
-    num_assets = len(asset_names)
-    mc_weights = []
-    mc_return = []
-    mc_risk = []
-    cvar_list = []
-    for _ in range(points):
+# بازده و کوواریانس
+returns = prices_df.pct_change().dropna()
+mean_returns = returns.mean() * 12
+cov_matrix = returns.cov() * 12
+
+# ========= اثر بیمه روی کوواریانس =========
+cov_adj = cov_matrix.copy()
+for idx, name in enumerate(asset_names):
+    if name in st.session_state["insured_assets"]:
+        cov_adj.iloc[idx, idx] *= 0.2
+        cov_adj.iloc[idx, :] *= 0.5
+        cov_adj.iloc[:, idx] *= 0.5
+        cov_adj.iloc[idx, idx] *= 0.8
+
+# ========= Efficient Frontier =========
+def efficient_frontier(mean_returns, cov_matrix, points=200, min_weights=None, max_weights=None):
+    num_assets = len(mean_returns)
+    results = np.zeros((3, points))
+    weight_record = []
+    for i in range(points):
         while True:
-            w = np.random.dirichlet(np.ones(num_assets), size=1)[0]
-            w = np.maximum(w, [min_weights[n] for n in asset_names])
-            w = np.minimum(w, [max_weights[n] for n in asset_names])
-            w /= w.sum()
-            if np.all(w >= [min_weights[n] for n in asset_names]) and np.all(w <= [max_weights[n] for n in asset_names]):
+            weights = np.random.dirichlet(np.ones(num_assets), size=1)[0]
+            if min_weights is not None:
+                weights = np.maximum(weights, min_weights)
+            if max_weights is not None:
+                weights = np.minimum(weights, max_weights)
+            weights /= np.sum(weights)
+            if (min_weights is None or np.all(weights >= min_weights)) and (max_weights is None or np.all(weights <= max_weights)):
                 break
-        port_ret = np.dot(w, mean_returns)
-        port_std = np.sqrt(np.dot(w.T, np.dot(cov_matrix, w)))
-        pf = (returns * w).sum(axis=1)
-        cvar = pf[pf <= np.percentile(pf, 5)].mean()
-        mc_weights.append(w)
-        mc_return.append(port_ret)
-        mc_risk.append(port_std)
-        cvar_list.append(cvar)
-    mc_weights = np.array(mc_weights)
-    mc_return = np.array(mc_return)
-    mc_risk = np.array(mc_risk)
-    cvar_list = np.array(cvar_list)
+        port_return = np.dot(weights, mean_returns)
+        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        results[0, i] = port_std
+        results[1, i] = port_return
+        results[2, i] = (port_return) / port_std if port_std > 0 else 0
+        weight_record.append(weights)
+    return results, np.array(weight_record)
 
-    # MC Portfolio
-    mc_idx = np.argmax(mc_return / mc_risk)
-    mc_best_weights = mc_weights[mc_idx]
-    pf_prices_mc = (prices_df * mc_best_weights).sum(axis=1)
-    pf_returns_mc = pf_prices_mc.pct_change().dropna()
-    mean_ann_mc = pf_returns_mc.mean() * 12
-    risk_ann_mc = pf_returns_mc.std() * np.sqrt(12)
+# ========= مرز کارا (MPT) =========
+ef_results, ef_weights = efficient_frontier(
+    mean_returns, cov_adj, points=300,
+    min_weights=np.array([min_weights[n] for n in asset_names]),
+    max_weights=np.array([max_weights[n] for n in asset_names])
+)
+max_sharpe_idx = np.argmax(ef_results[2])
+mpt_weights = ef_weights[max_sharpe_idx]
+pf_prices_mpt = (prices_df * mpt_weights).sum(axis=1)
+pf_returns_mpt = pf_prices_mpt.pct_change().dropna()
+mean_ann_mpt = pf_returns_mpt.mean() * 12
+risk_ann_mpt = pf_returns_mpt.std() * np.sqrt(12)
 
-    # CVaR Portfolio
-    cvar_idx = np.argmax(cvar_list)
-    cvar_best_weights = mc_weights[cvar_idx]
-    pf_prices_cvar = (prices_df * cvar_best_weights).sum(axis=1)
-    pf_returns_cvar = pf_prices_cvar.pct_change().dropna()
-    mean_ann_cvar = pf_returns_cvar.mean() * 12
-    risk_ann_cvar = pf_returns_cvar.std() * np.sqrt(12)
+# ========= پرتفو مونت‌کارلو و CVaR =========
+points = 5000
+num_assets = len(asset_names)
+mc_weights = []
+mc_return = []
+mc_risk = []
+cvar_list = []
+for _ in range(points):
+    while True:
+        w = np.random.dirichlet(np.ones(num_assets), size=1)[0]
+        w = np.maximum(w, [min_weights[n] for n in asset_names])
+        w = np.minimum(w, [max_weights[n] for n in asset_names])
+        w /= w.sum()
+        if np.all(w >= [min_weights[n] for n in asset_names]) and np.all(w <= [max_weights[n] for n in asset_names]):
+            break
+    port_ret = np.dot(w, mean_returns)
+    port_std = np.sqrt(np.dot(w.T, np.dot(cov_matrix, w)))
+    pf = (returns * w).sum(axis=1)
+    cvar = pf[pf <= np.percentile(pf, 5)].mean()
+    mc_weights.append(w)
+    mc_return.append(port_ret)
+    mc_risk.append(port_std)
+    cvar_list.append(cvar)
+mc_weights = np.array(mc_weights)
+mc_return = np.array(mc_return)
+mc_risk = np.array(mc_risk)
+cvar_list = np.array(cvar_list)
 
-    # ========= داشبورد =========
-    st.markdown("#### 📊 پرتفو بهینه مرز کارا (MPT)")
-    st.markdown(f"""<div dir="rtl" style="text-align:right">
-    <b>سالانه:</b> بازده: {mean_ann_mpt:.2%} | ریسک: {risk_ann_mpt:.2%}<br>
-    <b>وزن پرتفو:</b> {' | '.join([f"{n}: {w:.2%}" for n, w in zip(asset_names, mpt_weights)])}
-    </div>
-    """, unsafe_allow_html=True)
-    st.markdown("---")
-    st.markdown("#### 📊 پرتفو بهینه مونت‌کارلو")
-    st.markdown(f"""<div dir="rtl" style="text-align:right">
-    <b>سالانه:</b> بازده: {mean_ann_mc:.2%} | ریسک: {risk_ann_mc:.2%}<br>
-    <b>وزن پرتفو:</b> {' | '.join([f"{n}: {w:.2%}" for n, w in zip(asset_names, mc_best_weights)])}
-    </div>
-    """, unsafe_allow_html=True)
-    st.markdown("---")
-    st.markdown("#### 📊 پرتفو بهینه CVaR (95%)")
-    st.markdown(f"""<div dir="rtl" style="text-align:right">
-    <b>سالانه:</b> بازده: {mean_ann_cvar:.2%} | ریسک: {risk_ann_cvar:.2%}<br>
-    <b>وزن پرتفو:</b> {' | '.join([f"{n}: {w:.2%}" for n, w in zip(asset_names, cvar_best_weights)])}
-    </div>
-    """, unsafe_allow_html=True)
-    st.markdown("---")
+# MC Portfolio
+mc_idx = np.argmax(mc_return / mc_risk)
+mc_best_weights = mc_weights[mc_idx]
+pf_prices_mc = (prices_df * mc_best_weights).sum(axis=1)
+pf_returns_mc = pf_prices_mc.pct_change().dropna()
+mean_ann_mc = pf_returns_mc.mean() * 12
+risk_ann_mc = pf_returns_mc.std() * np.sqrt(12)
 
-    # ===== نمودارهای دایره‌ای وزن =====
-    st.markdown("#### توزیع وزنی پرتفو بهینه مرز کارا (MPT)")
-    fig_pie_mpt = px.pie(
-        values=mpt_weights,
-        names=asset_names,
-        hole=0.5
-    )
-    st.plotly_chart(fig_pie_mpt)
+# CVaR Portfolio
+cvar_idx = np.argmax(cvar_list)
+cvar_best_weights = mc_weights[cvar_idx]
+pf_prices_cvar = (prices_df * cvar_best_weights).sum(axis=1)
+pf_returns_cvar = pf_prices_cvar.pct_change().dropna()
+mean_ann_cvar = pf_returns_cvar.mean() * 12
+risk_ann_cvar = pf_returns_cvar.std() * np.sqrt(12)
 
-    st.markdown("#### توزیع وزنی پرتفو بهینه مونت‌کارلو")
-    fig_pie_mc = px.pie(
-        values=mc_best_weights,
-        names=asset_names,
-        hole=0.5
-    )
-    st.plotly_chart(fig_pie_mc)
+# ========= داشبورد =========
+st.markdown("#### 📊 پرتفو بهینه مرز کارا (MPT)")
+st.markdown(f"""<div dir="rtl" style="text-align:right">
+<b>سالانه:</b> بازده: {mean_ann_mpt:.2%} | ریسک: {risk_ann_mpt:.2%}<br>
+<b>وزن پرتفو:</b> {' | '.join([f"{n}: {w:.2%}" for n, w in zip(asset_names, mpt_weights)])}
+</div>
+""", unsafe_allow_html=True)
+st.markdown("---")
+st.markdown("#### 📊 پرتفو بهینه مونت‌کارلو")
+st.markdown(f"""<div dir="rtl" style="text-align:right">
+<b>سالانه:</b> بازده: {mean_ann_mc:.2%} | ریسک: {risk_ann_mc:.2%}<br>
+<b>وزن پرتفو:</b> {' | '.join([f"{n}: {w:.2%}" for n, w in zip(asset_names, mc_best_weights)])}
+</div>
+""", unsafe_allow_html=True)
+st.markdown("---")
+st.markdown("#### 📊 پرتفو بهینه CVaR (95%)")
+st.markdown(f"""<div dir="rtl" style="text-align:right">
+<b>سالانه:</b> بازده: {mean_ann_cvar:.2%} | ریسک: {risk_ann_cvar:.2%}<br>
+<b>وزن پرتفو:</b> {' | '.join([f"{n}: {w:.2%}" for n, w in zip(asset_names, cvar_best_weights)])}
+</div>
+""", unsafe_allow_html=True)
+st.markdown("---")
 
-    st.markdown("#### توزیع وزنی پرتفو بهینه CVaR")
-    fig_pie_cvar = px.pie(
-        values=cvar_best_weights,
-        names=asset_names,
-        hole=0.5
-    )
-    st.plotly_chart(fig_pie_cvar)
+# ===== نمودارهای دایره‌ای وزن =====
+st.markdown("#### توزیع وزنی پرتفو بهینه مرز کارا (MPT)")
+fig_pie_mpt = px.pie(
+    values=mpt_weights,
+    names=asset_names,
+    hole=0.5
+)
+st.plotly_chart(fig_pie_mpt)
 
-    # ===== نمودار مرز کارا =====
-    fig_all = go.Figure()
-    fig_all.add_trace(go.Scatter(
-        x=ef_results[0]*100, y=ef_results[1]*100,
-        mode='lines+markers', marker=dict(color='gray', size=5), name='مرز کارا (MPT)'
-    ))
-    fig_all.add_trace(go.Scatter(
-        x=[ef_results[0, max_sharpe_idx]*100], y=[ef_results[1, max_sharpe_idx]*100],
-        mode='markers+text', marker=dict(size=16, color='red', symbol='star'),
-        text=["MPT"], textposition="bottom right", name='پرتفو بهینه MPT'
-    ))
-    fig_all.update_layout(
-        title="مرز کارا با تاثیر بیمه و نمایش پرتفو بهینه MPT",
-        xaxis_title="ریسک (%)",
-        yaxis_title="بازده (%)"
-    )
-    st.markdown("#### نمودار مرز کارا و نقطه بهینه")
-    st.plotly_chart(fig_all, use_container_width=True)
+st.markdown("#### توزیع وزنی پرتفو بهینه مونت‌کارلو")
+fig_pie_mc = px.pie(
+    values=mc_best_weights,
+    names=asset_names,
+    hole=0.5
+)
+st.plotly_chart(fig_pie_mc)
 
-else:
-    st.warning("لطفاً حداقل یک فایل CSV معتبر آپلود کنید یا داده‌ای از یاهو فایننس دریافت کنید.")
+st.markdown("#### توزیع وزنی پرتفو بهینه CVaR")
+fig_pie_cvar = px.pie(
+    values=cvar_best_weights,
+    names=asset_names,
+    hole=0.5
+)
+st.plotly_chart(fig_pie_cvar)
+
+# ===== نمودار مرز کارا =====
+fig_all = go.Figure()
+fig_all.add_trace(go.Scatter(
+    x=ef_results[0]*100, y=ef_results[1]*100,
+    mode='lines+markers', marker=dict(color='gray', size=5), name='مرز کارا (MPT)'
+))
+fig_all.add_trace(go.Scatter(
+    x=[ef_results[0, max_sharpe_idx]*100], y=[ef_results[1, max_sharpe_idx]*100],
+    mode='markers+text', marker=dict(size=16, color='red', symbol='star'),
+    text=["MPT"], textposition="bottom right", name='پرتفو بهینه MPT'
+))
+fig_all.update_layout(
+    title="مرز کارا با تاثیر بیمه و نمایش پرتفو بهینه MPT",
+    xaxis_title="ریسک (%)",
+    yaxis_title="بازده (%)"
+)
+st.markdown("#### نمودار مرز کارا و نقطه بهینه")
+st.plotly_chart(fig_all, use_container_width=True)
