@@ -7,8 +7,7 @@ import yfinance as yf
 import base64
 from collections import Counter
 
-# ========== Helper Functions ==========
-
+# ---------- Helper Functions ----------
 def format_money(val):
     if val == 0:
         return "۰ دلار"
@@ -101,12 +100,6 @@ def get_price_dataframe_from_yf(data, t):
         df = data[['Date', price_col]].rename(columns={price_col: 'Price'})
         return df, None
 
-def calculate_max_drawdown(prices: pd.Series) -> float:
-    roll_max = prices.cummax()
-    drawdown = (prices - roll_max) / roll_max
-    max_dd = drawdown.min()
-    return max_dd
-
 def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200):
     mean_returns = np.atleast_1d(np.array(mean_returns))
     cov_matrix = np.atleast_2d(np.array(cov_matrix))
@@ -143,8 +136,7 @@ def download_link(df, filename):
     b64 = base64.b64encode(csv).decode()
     return f'<a href="data:file/csv;base64,{b64}" download="{filename}">⬇️ دریافت فایل CSV</a>'
 
-# ========== Session State ==========
-
+# ---------- Session State ----------
 if "downloaded_dfs" not in st.session_state:
     st.session_state["downloaded_dfs"] = []
 if "uploaded_dfs" not in st.session_state:
@@ -154,8 +146,7 @@ if "insured_assets" not in st.session_state:
 if "investment_amount" not in st.session_state:
     st.session_state["investment_amount"] = 1000.0
 
-# ========== Sidebar: File Upload/Delete ==========
-
+# ---------- Sidebar: File Upload/Delete ----------
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV آپلود کنید (هر دارایی یک فایل)", type=['csv'], accept_multiple_files=True, key="uploader"
@@ -185,19 +176,7 @@ if st.session_state["uploaded_dfs"]:
                 st.session_state["uploaded_dfs"].pop(idx)
                 st.experimental_rerun()
 
-# ========== Sidebar: Params and Yahoo Download ==========
-
-period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
-resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'شش‌ماهه': '2Q'}[period]
-annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}[period]
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("<b>نرخ بدون ریسک (برای نسبت شارپ و خط CML):</b>", unsafe_allow_html=True)
-user_rf = st.sidebar.number_input("نرخ بدون ریسک سالانه (%)", min_value=0.0, max_value=100.0, value=3.0, step=0.1) / 100
-
-user_risk = st.sidebar.slider("ریسک هدف پرتفو (انحراف معیار سالانه)", 0.01, 1.0, 0.25, 0.01)
-cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
-
+# ---------- Sidebar: Yahoo Finance Download ----------
 with st.sidebar.expander("📥 دانلود داده آنلاین از Yahoo Finance"):
     st.markdown("""
     <div dir="rtl" style="text-align: right;">
@@ -239,8 +218,19 @@ if uploaded_files:
                 st.session_state["uploaded_dfs"].append((file.name.split('.')[0], df))
             file.uploaded_in_session = True
 
-# ========== Sidebar: Investment Amount & Insurance ==========
+# ---------- Sidebar: Parameters ----------
+period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
+resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'شش‌ماهه': '2Q'}[period]
+annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}[period]
 
+st.sidebar.markdown("---")
+st.sidebar.markdown("<b>نرخ بدون ریسک (برای نسبت شارپ و خط CML):</b>", unsafe_allow_html=True)
+user_rf = st.sidebar.number_input("نرخ بدون ریسک سالانه (%)", min_value=0.0, max_value=100.0, value=3.0, step=0.1) / 100
+
+user_risk = st.sidebar.slider("ریسک هدف پرتفو (انحراف معیار سالانه)", 0.01, 1.0, 0.25, 0.01)
+cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0.01)
+
+# ---------- Sidebar: Investment Amount & Insurance ----------
 all_asset_names = [t for t, _ in st.session_state["downloaded_dfs"]] + [t for t, _ in st.session_state["uploaded_dfs"]]
 
 with st.sidebar.expander("💵 مقدار کل سرمایه‌گذاری (معادل دلاری)", expanded=True):
@@ -281,10 +271,8 @@ for name in all_asset_names:
         else:
             st.session_state["insured_assets"].pop(name, None)
 
-# ========== Main Analysis ==========
-
+# ---------- Main Analysis ----------
 if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
-    # ساخت دیتافریم قیمت با نام یکتا برای هر دارایی
     name_counter = Counter()
     df_list = []
     asset_names = []
@@ -294,14 +282,18 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         name = base_name if name_counter[base_name] == 1 else f"{base_name} ({name_counter[base_name]})"
         temp_df = df.copy()
         temp_df = temp_df.rename(columns={"Price": name})
+        temp_df = temp_df.dropna(subset=[name])
+        temp_df = temp_df.set_index("Date")
         asset_names.append(name)
         df_list.append(temp_df[[name]])
     if len(df_list) == 0:
         st.error("هیچ دیتافریمی برای پردازش وجود ندارد.")
         st.stop()
     prices_df = pd.concat(df_list, axis=1, join="inner")
+    if not isinstance(prices_df.index, pd.DatetimeIndex):
+        prices_df.index = pd.to_datetime(prices_df.index)
 
-    # --- نمایش روند قیمت
+    # نمایش روند قیمت
     with st.expander("📈 مشاهده روند قیمت دارایی‌ها", expanded=True):
         st.markdown("""
         <div dir="rtl" style="text-align:right">
@@ -311,14 +303,14 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         """, unsafe_allow_html=True)
         st.line_chart(prices_df.resample(resample_rule).last().dropna())
 
-    # --- تحلیل بازده و کوواریانس
+    # تحلیل بازده و کوواریانس
     resampled_prices = prices_df.resample(resample_rule).last().dropna()
     returns = resampled_prices.pct_change().dropna()
     mean_returns = np.atleast_1d(np.array(returns.mean() * annual_factor))
     cov_matrix = np.atleast_2d(np.array(returns.cov() * annual_factor))
     std_devs = np.atleast_1d(np.sqrt(np.diag(cov_matrix)))
 
-    # --- اثر بیمه روی کوواریانس (فقط دارایی‌های بیمه شده) و وزن‌دهی
+    # اثر بیمه روی کوواریانس (فقط دارایی‌های بیمه شده) و وزن‌دهی
     adjusted_cov = cov_matrix.copy()
     preference_weights = []
     for i, name in enumerate(asset_names):
@@ -332,13 +324,13 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     preference_weights = np.array(preference_weights)
     preference_weights /= np.sum(preference_weights)
 
-    # --- شبیه‌سازی پرتفوها (MC، CVaR) با نرخ بدون ریسک
+    # شبیه‌سازی پرتفوها (MC، CVaR) با نرخ بدون ریسک
     n_portfolios = 3000
     n_mc = 1000
     results = np.zeros((5 + len(asset_names), n_portfolios))
     cvar_results = np.zeros((3 + len(asset_names), n_portfolios))
     np.random.seed(42)
-    rf = user_rf  # نرخ بدون ریسک جدید
+    rf = user_rf
 
     downside = returns.copy()
     downside[downside > 0] = 0
@@ -371,12 +363,12 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     best_cvar_idx = np.argmin(results[4])
     best_cvar_weights = results[5:, best_cvar_idx]
 
-    # --- مرز کارا با adjusted_cov و نرخ بدون ریسک
+    # مرز کارا با adjusted_cov و نرخ بدون ریسک
     ef_results, ef_weights = efficient_frontier(mean_returns, adjusted_cov, annual_factor, points=400)
-    max_sharpe_idx = np.argmax((ef_results[1] - rf) / ef_results[0])  # Sharpe با نرخ بدون ریسک
+    max_sharpe_idx = np.argmax((ef_results[1] - rf) / ef_results[0])
     mpt_weights = ef_weights[max_sharpe_idx]
 
-    # --- راهنمای سبک ها
+    # راهنمای سبک ها
     st.markdown("""
     <div dir="rtl" style="text-align:right">
     <b>راهنما:</b>
@@ -388,7 +380,7 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     </div>
     """, unsafe_allow_html=True)
 
-    # --- داشبورد و نمودارها برای هر سبک
+    # داشبورد و نمودارها برای هر سبک
     styles = [
         ("پرتفو بهینه مونت‌کارلو", best_weights, "MC", "red"),
         (f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)", best_cvar_weights, "CVaR", "green"),
@@ -421,7 +413,6 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             )
             st.plotly_chart(fig_pie, use_container_width=True)
 
-            # نمودار مرز کارا با خط CML و نقطه پرتفو
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=ef_results[0], y=ef_results[1],
@@ -471,7 +462,6 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     )
     st.plotly_chart(fig_all, use_container_width=True)
 
-    # بیمه (Married Put)
     st.subheader("📉 بیمه دارایی‌ها (Married Put)")
     for name in st.session_state["insured_assets"]:
         info = st.session_state["insured_assets"][name]
