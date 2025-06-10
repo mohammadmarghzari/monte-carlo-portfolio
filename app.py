@@ -293,6 +293,15 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     if not isinstance(prices_df.index, pd.DatetimeIndex):
         prices_df.index = pd.to_datetime(prices_df.index)
 
+    # --- بیمه واقعا روی بازده محاسبه شود
+    resampled_prices = prices_df.resample(resample_rule).last().dropna()
+    returns = resampled_prices.pct_change().dropna()
+    returns_insured = returns.copy()
+    for i, name in enumerate(asset_names):
+        if name in st.session_state["insured_assets"]:
+            loss_percent = st.session_state["insured_assets"][name]['loss_percent'] / 100
+            returns_insured[name] = returns[name].apply(lambda x: max(x, -loss_percent))
+
     with st.expander("📈 مشاهده روند قیمت دارایی‌ها", expanded=True):
         st.markdown("""
         <div dir="rtl" style="text-align:right">
@@ -302,44 +311,34 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         """, unsafe_allow_html=True)
         st.line_chart(prices_df.resample(resample_rule).last().dropna())
 
-    resampled_prices = prices_df.resample(resample_rule).last().dropna()
-    returns = resampled_prices.pct_change().dropna()
-    mean_returns = np.atleast_1d(np.array(returns.mean() * annual_factor))
-    cov_matrix = np.atleast_2d(np.array(returns.cov() * annual_factor))
+    mean_returns = np.atleast_1d(np.array(returns_insured.mean() * annual_factor))
+    cov_matrix = np.atleast_2d(np.array(returns_insured.cov() * annual_factor))
     std_devs = np.atleast_1d(np.sqrt(np.diag(cov_matrix)))
 
-    adjusted_cov = cov_matrix.copy()
-    preference_weights = []
-    for i, name in enumerate(asset_names):
-        if name in st.session_state["insured_assets"]:
-            risk_scale = 1 - st.session_state["insured_assets"][name]['loss_percent'] / 100
-            adjusted_cov[i, :] *= risk_scale
-            adjusted_cov[:, i] *= risk_scale
-            preference_weights.append(1 / (std_devs[i] * risk_scale**0.7))
-        else:
-            preference_weights.append(1 / std_devs[i])
-    preference_weights = np.array(preference_weights)
+    preference_weights = np.array([1 / sd if sd != 0 else 1 for sd in std_devs])
     preference_weights /= np.sum(preference_weights)
 
     n_portfolios = 3000
     n_mc = 1000
     results = np.zeros((5 + len(asset_names), n_portfolios))
-    cvar_results = np.zeros((3 + len(asset_names), n_portfolios))
+    all_portfolio_risks = []
+    all_portfolio_returns = []
     np.random.seed(42)
     rf = user_rf
 
-    downside = returns.copy()
+    downside = returns_insured.copy()
     downside[downside > 0] = 0
 
+    weights_list = []
     for i in range(n_portfolios):
         weights = np.random.random(len(asset_names)) * preference_weights
         weights /= np.sum(weights)
         port_return = np.dot(weights, mean_returns)
-        port_std = np.sqrt(np.dot(weights.T, np.dot(adjusted_cov, weights)))
+        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
         downside_risk = np.sqrt(np.dot(weights.T, np.dot(downside.cov() * annual_factor, weights)))
         sharpe_ratio = (port_return - rf) / port_std
         sortino_ratio = (port_return - rf) / downside_risk if downside_risk > 0 else np.nan
-        mc_sims = np.random.multivariate_normal(mean_returns/annual_factor, adjusted_cov/annual_factor, n_mc)
+        mc_sims = np.random.multivariate_normal(mean_returns/annual_factor, cov_matrix/annual_factor, n_mc)
         port_mc_returns = np.dot(mc_sims, weights)
         VaR = np.percentile(port_mc_returns, (1 - cvar_alpha) * 100)
         CVaR = port_mc_returns[port_mc_returns <= VaR].mean() if np.any(port_mc_returns <= VaR) else VaR
@@ -349,17 +348,16 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         results[3, i] = sortino_ratio
         results[4, i] = -CVaR
         results[5:, i] = weights
-        cvar_results[0, i] = port_std
-        cvar_results[1, i] = port_return
-        cvar_results[2, i] = -CVaR
-        cvar_results[3:, i] = weights
+        all_portfolio_risks.append(port_std)
+        all_portfolio_returns.append(port_return)
+        weights_list.append(weights)
 
     best_idx = np.argmin(np.abs(results[1] - user_risk))
     best_weights = results[5:, best_idx]
     best_cvar_idx = np.argmin(results[4])
     best_cvar_weights = results[5:, best_cvar_idx]
 
-    ef_results, ef_weights = efficient_frontier(mean_returns, adjusted_cov, annual_factor, points=400)
+    ef_results, ef_weights = efficient_frontier(mean_returns, cov_matrix, annual_factor, points=400)
     max_sharpe_idx = np.argmax((ef_results[1] - rf) / ef_results[0])
     mpt_weights = ef_weights[max_sharpe_idx]
 
@@ -374,13 +372,35 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     </div>
     """, unsafe_allow_html=True)
 
+
+    # نمایش وزن دلاری و درصدی هر دارایی برای هر سبک
+    st.markdown("### 💰 ترکیب سرمایه‌گذاری هر سبک (درصد و دلار)")
+    for label, weights in [
+        ("پرتفو بهینه مونت‌کارلو", best_weights),
+        (f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)", best_cvar_weights),
+        ("پرتفو بهینه MPT", mpt_weights)
+    ]:
+        st.markdown(f"**{label}:**")
+        cols = st.columns(len(asset_names))
+        for i, name in enumerate(asset_names):
+            percent = weights[i]
+            dollar = percent * st.session_state["investment_amount"]
+            with cols[i]:
+                st.markdown(f"""
+                <div style='text-align:center;direction:rtl'>
+                <b>{name}</b><br>
+                {format_percent(percent)}<br>
+                {format_money(dollar)}
+                </div>
+                """, unsafe_allow_html=True)
+
+    # نمودار مرز کارا برای هر سبک با نقطه پرتفو
     styles = [
         ("پرتفو بهینه مونت‌کارلو", best_weights, "MC", "red"),
         (f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)", best_cvar_weights, "CVaR", "green"),
         ("پرتفو بهینه MPT", mpt_weights, "MPT", "blue")
     ]
     style_points = {}
-
     for label, weights, code, color in styles:
         mean_m, risk_m, mean_a, risk_a = portfolio_risk_return(resampled_prices, weights, freq_label="M")
         sharpe = (mean_a - rf) / risk_a
@@ -398,6 +418,7 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
                 f"<b>ماهانه:</b> بازده: {format_percent(mean_m)} | ریسک: {format_percent(risk_m)}",
                 unsafe_allow_html=True
             )
+            # نمودار دایره‌ای وزن‌دهی
             fig_pie = px.pie(
                 values=weights,
                 names=asset_names,
@@ -406,40 +427,40 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             )
             st.plotly_chart(fig_pie, use_container_width=True)
 
+            # نمودار مرز کارا و نقطه پرتفو
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=ef_results[0], y=ef_results[1],
                 mode="lines", line=dict(color="gray", width=2), name="مرز کارا"
-            ))
-            max_risk = max(ef_results[0].max(), risk_a) * 1.1
-            x_cml = np.linspace(0, max_risk, 100)
-            y_cml = rf + sharpe * x_cml
-            fig.add_trace(go.Scatter(
-                x=x_cml, y=y_cml, mode="lines", line=dict(dash="dash", color=color), name="خط بازار سرمایه (CML)"
             ))
             fig.add_trace(go.Scatter(
                 x=[risk_a], y=[mean_a], mode="markers+text", marker=dict(size=14, color=color, symbol="star"),
                 text=[code], textposition="top right", name=f"{label}"
             ))
             fig.update_layout(
-                title=f"مرز کارا و خط بازار سرمایه ({label})",
+                title=f"مرز کارا و نقطه {label}",
                 xaxis_title="ریسک سالانه (انحراف معیار)",
                 yaxis_title="بازده سالانه",
                 legend=dict(x=0.01, y=0.99, bgcolor='rgba(0,0,0,0)')
             )
             st.plotly_chart(fig, use_container_width=True)
 
+    # نمودار مرز کارای جامع با نمایش همه نمونه پرتفوها و نقاط سبک ها
     st.markdown("### 📈 مقایسه نهایی: مرز کارا و جایگاه پرتفوهای بهینه")
     st.markdown("""
     <div dir="rtl" style="text-align:right">
-    این نمودار مرز کارای نظری را به همراه سه پرتفو بهینه (مونت‌کارلو، CVaR، MPT) و نسبت شارپ هرکدام نمایش می‌دهد.<br>
+    این نمودار مرز کارا (نمونه‌برداری شده) و سه پرتفو بهینه را نمایش می‌دهد.<br>
     نقاط هر سبک با رنگ متفاوت مشخص شده‌اند.
     </div>
     """, unsafe_allow_html=True)
     fig_all = go.Figure()
     fig_all.add_trace(go.Scatter(
+        x=all_portfolio_risks, y=all_portfolio_returns, mode='markers',
+        marker=dict(color='lightgray', size=3), name='پرتفوهای تصادفی'
+    ))
+    fig_all.add_trace(go.Scatter(
         x=ef_results[0], y=ef_results[1],
-        mode='lines', marker=dict(color='gray', size=5), name='مرز کارا'
+        mode='lines', line=dict(color='black', width=2), name='مرز کارا'
     ))
     color_map = {"MC": "red", "CVaR": "green", "MPT": "blue"}
     for code, (risk, mean, sharpe) in style_points.items():
@@ -449,7 +470,7 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             text=[code], textposition="top right", name=f"پرتفو {code} (شارپ={sharpe:.2f})"
         ))
     fig_all.update_layout(
-        title="مرز کارا با نمایش پرتفوهای بهینه سه سبک",
+        title="مرز کارا و پراکندگی پرتفوها",
         xaxis_title="ریسک سالانه (انحراف معیار)",
         yaxis_title="بازده سالانه"
     )
