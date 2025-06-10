@@ -174,7 +174,31 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ========== بارگذاری، تنظیمات، بیمه و محدودیت وزن ==========
-# (همانند کدهای قبلی شما)
+st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
+uploaded_files = st.sidebar.file_uploader(
+    "چند فایل CSV آپلود کنید (هر دارایی یک فایل)", type=['csv'], accept_multiple_files=True, key="uploader"
+)
+period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
+resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'شش‌ماهه': '2Q'}[period]
+annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}[period]
+
+all_asset_names = [t for t, _ in st.session_state["downloaded_dfs"]] + [t for t, _ in st.session_state["uploaded_dfs"]]
+for name in all_asset_names:
+    with st.sidebar.expander(f"⚙️ بیمه برای {name}", expanded=False):
+        insured = st.checkbox(f"فعال‌سازی بیمه برای {name}", key=f"insured_{name}")
+        if insured:
+            # پارامترهای ساده بیمه (برای کنترل ریسک MPT)
+            st.session_state["insured_assets"][name] = True
+        else:
+            st.session_state["insured_assets"].pop(name, None)
+
+st.sidebar.markdown("<hr/>", unsafe_allow_html=True)
+st.sidebar.markdown("### محدودیت وزن هر دارایی در پرتفو")
+min_weights = {}
+max_weights = {}
+for name in all_asset_names:
+    min_weights[name] = st.sidebar.number_input(f"حداقل وزن {name} (%)", 0.0, 100.0, 0.0, 1.0) / 100
+    max_weights[name] = st.sidebar.number_input(f"حداکثر وزن {name} (%)", 0.0, 100.0, 100.0, 1.0) / 100
 
 # ========== تحلیل پرتفو ==========
 if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
@@ -200,18 +224,17 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         asset_names.append(name)
 
     st.subheader("📉 روند قیمت دارایی‌ها")
-    st.line_chart(prices_df.resample('M').last().dropna())
+    st.line_chart(prices_df.resample(resample_rule).last().dropna())
 
     if prices_df.empty:
         st.error("❌ داده‌ی معتبری برای تحلیل یافت نشد.")
         st.stop()
 
     try:
-        resampled_prices = prices_df.resample('M').last().dropna()
+        resampled_prices = prices_df.resample(resample_rule).last().dropna()
         returns = resampled_prices.pct_change().dropna()
-        mean_returns = returns.mean() * 12
-        cov_matrix = returns.cov() * 12
-        annual_factor = 12
+        mean_returns = returns.mean() * annual_factor
+        cov_matrix = returns.cov() * annual_factor
 
         # اثر بیمه روی ماتریس کوواریانس و میانگین
         mean_adj = mean_returns.copy()
@@ -227,8 +250,8 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         # مرز کارا با اثر بیمه
         ef_results, ef_weights = efficient_frontier(
             mean_adj, cov_adj, annual_factor, points=200,
-            min_weights=np.array([0.0]*len(asset_names)),
-            max_weights=np.array([1.0]*len(asset_names))
+            min_weights=np.array([min_weights[n] for n in asset_names]),
+            max_weights=np.array([max_weights[n] for n in asset_names])
         )
         max_sharpe_idx_ef = np.argmax(ef_results[2])
         mpt_weights = ef_weights[max_sharpe_idx_ef]
