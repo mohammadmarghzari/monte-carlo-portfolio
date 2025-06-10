@@ -463,6 +463,11 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     all_sharpes = np.array(all_sharpes)
     all_cvars = np.array(all_cvars)
 
+    # چک آرایه خالی
+    if len(all_sharpes) == 0 or len(all_risks) == 0 or len(all_returns) == 0:
+        st.error("هیچ پرتفوی معتبری با محدودیت‌های فعلی پیدا نشد! محدودیت وزن‌ها را بررسی کنید یا داده ورودی را تغییر دهید.")
+        st.stop()
+
     # مرز کارا (با محدودیت وزن)
     ef_results, ef_weight_arr = efficient_frontier(mean_returns, cov_matrix, points=300, min_weights=min_weights, max_weights=max_weights)
 
