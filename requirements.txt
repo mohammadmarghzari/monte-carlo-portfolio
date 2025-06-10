@@ -2,14 +2,6 @@ streamlit
 pandas
 numpy
 plotly
-scipy
-matplotlib
-kaleido
 yfinance
-scikit-learn
-xlsxwriter
-openpyxl
-lightgbm
-xgboost
-statsmodels
-empyrical
+empyrical==0.5.5
+scipy
