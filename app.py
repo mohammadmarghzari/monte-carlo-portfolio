@@ -5,7 +5,9 @@ import plotly.graph_objects as go
 import yfinance as yf
 import base64
 
-# ========== 1. وضعیت Session ==========
+# =========================
+# 1. ذخیره داده‌های دانلودی/آپلودی و بیمه در session_state
+# =========================
 if "downloaded_dfs" not in st.session_state:
     st.session_state["downloaded_dfs"] = []
 if "uploaded_dfs" not in st.session_state:
@@ -13,7 +15,9 @@ if "uploaded_dfs" not in st.session_state:
 if "insured_assets" not in st.session_state:
     st.session_state["insured_assets"] = {}
 
-# ========== 2. خواندن فایل CSV ==========
+# =========================
+# 2. تابع خواندن فایل csv و استخراج price/date
+# =========================
 def read_csv_file(file):
     try:
         file.seek(0)
@@ -61,13 +65,17 @@ def read_csv_file(file):
         st.error(f"خطا در خواندن فایل {file.name}: {e}")
         return None
 
-# ========== 3. لینک دانلود دیتافریم به csv ==========
+# =========================
+# 3. لینک دانلود دیتافریم به csv
+# =========================
 def download_link(df, filename):
     csv = df.reset_index(drop=True).to_csv(index=False).encode()
     b64 = base64.b64encode(csv).decode()
     return f'<a href="data:file/csv;base64,{b64}" download="{filename}">⬇️ دریافت فایل CSV</a>'
 
-# ========== 4. تبدیل داده یاهو به فرمت price/date ==========
+# =========================
+# 4. تبدیل داده یاهو به فرمت price/date
+# =========================
 def get_price_dataframe_from_yf(data, t):
     if isinstance(data.columns, pd.MultiIndex):
         if t in data.columns.levels[0]:
@@ -96,14 +104,18 @@ def get_price_dataframe_from_yf(data, t):
         df = data[['Date', price_col]].rename(columns={price_col: 'Price'})
         return df, None
 
-# ========== 5. Max Drawdown ==========
+# =========================
+# 5. محاسبه Max Drawdown پرتفوی
+# =========================
 def calculate_max_drawdown(prices: pd.Series) -> float:
     roll_max = prices.cummax()
     drawdown = (prices - roll_max) / roll_max
     max_dd = drawdown.min()
     return max_dd
 
-# ========== 6. بازده و ریسک پرتفو ==========
+# =========================
+# 6. نمایش بازده و ریسک پرتفوی در بازه های مختلف
+# =========================
 def show_periodic_risk_return(resampled_prices, weights, label):
     pf_prices = (resampled_prices * weights).sum(axis=1)
     pf_returns = pf_prices.pct_change().dropna()
@@ -126,7 +138,9 @@ def show_periodic_risk_return(resampled_prices, weights, label):
     </div>
     """, unsafe_allow_html=True)
 
-# ========== 7. مرز کارا ==========
+# =========================
+# 7. Efficient Frontier با محدودیت وزن
+# =========================
 def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200, min_weights=None, max_weights=None):
     num_assets = len(mean_returns)
     results = np.zeros((3, points))
@@ -149,7 +163,9 @@ def efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200, min_
         weight_record.append(weights)
     return results, np.array(weight_record)
 
-# ========== 8. توضیحات ابزار ==========
+# =========================
+# 8. توضیحات ابزار (راهنما)
+# =========================
 st.markdown("""
 <div dir="rtl" style="text-align: right;">
 <h3>ابزار تحلیل پرتفو: توضیحات کلی</h3>
@@ -157,12 +173,11 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ========== 9. بارگذاری و حذف دارایی ==========
+# ========== بارگذاری، تنظیمات، بیمه و محدودیت وزن ==========
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
 uploaded_files = st.sidebar.file_uploader(
     "چند فایل CSV آپلود کنید (هر دارایی یک فایل)", type=['csv'], accept_multiple_files=True, key="uploader"
 )
-
 if st.session_state["downloaded_dfs"]:
     st.sidebar.markdown("<b>حذف دارایی‌های دانلود شده:</b>", unsafe_allow_html=True)
     for idx, (t, df) in enumerate(st.session_state["downloaded_dfs"]):
@@ -184,7 +199,6 @@ if st.session_state["uploaded_dfs"]:
                 st.session_state["uploaded_dfs"].pop(idx)
                 st.experimental_rerun()
 
-# ========== 10. پارامترها ==========
 period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه', 'سه‌ماهه', 'شش‌ماهه'])
 resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'شش‌ماهه': '2Q'}[period]
 annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}[period]
@@ -193,7 +207,6 @@ cvar_alpha = st.sidebar.slider("سطح اطمینان CVaR", 0.80, 0.99, 0.95, 0
 st.sidebar.markdown("<hr/>", unsafe_allow_html=True)
 rf_rate = st.sidebar.number_input("نرخ بازده سالانه دارایی بدون ریسک (سپرده/اوراق، درصد)", 0.0, 100.0, 20.0, 0.1) / 100
 
-# ========== 11. دانلود داده یاهو ==========
 with st.sidebar.expander("📥 دانلود داده آنلاین از Yahoo Finance"):
     st.markdown("""
     <div dir="rtl" style="text-align: right;">
@@ -226,7 +239,6 @@ if download_btn and tickers_input.strip():
     except Exception as ex:
         st.error(f"خطا در دریافت داده: {ex}")
 
-# ========== 12. آپلود CSV ==========
 if uploaded_files:
     for file in uploaded_files:
         if not hasattr(file, "uploaded_in_session") or not file.uploaded_in_session:
@@ -235,7 +247,6 @@ if uploaded_files:
                 st.session_state["uploaded_dfs"].append((file.name.split('.')[0], df))
             file.uploaded_in_session = True
 
-# ========== 13. بیمه ================
 all_asset_names = [t for t, _ in st.session_state["downloaded_dfs"]] + [t for t, _ in st.session_state["uploaded_dfs"]]
 for name in all_asset_names:
     with st.sidebar.expander(f"⚙️ بیمه برای {name}", expanded=False):
@@ -259,7 +270,6 @@ for name in all_asset_names:
         else:
             st.session_state["insured_assets"].pop(name, None)
 
-# ========== 13.1 محدودیت وزن ==========
 st.sidebar.markdown("<hr/>", unsafe_allow_html=True)
 st.sidebar.markdown("### محدودیت وزن هر دارایی در پرتفو")
 min_weights = {}
@@ -268,7 +278,7 @@ for name in all_asset_names:
     min_weights[name] = st.sidebar.number_input(f"حداقل وزن {name} (%)", 0.0, 100.0, 0.0, 1.0) / 100
     max_weights[name] = st.sidebar.number_input(f"حداکثر وزن {name} (%)", 0.0, 100.0, 100.0, 1.0) / 100
 
-# ========== 14. تحلیل پرتفو ==========
+# ========== تحلیل پرتفو ==========
 if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     prices_df = pd.DataFrame()
     asset_names = []
@@ -311,11 +321,9 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         cov_matrix_rf = np.zeros((len(asset_names_rf), len(asset_names_rf)))
         cov_matrix_rf[:-1, :-1] = cov_matrix.values
 
-        # محدودیت وزن
         min_w = np.array([min_weights[n] for n in asset_names] + [0.0])
         max_w = np.array([max_weights[n] for n in asset_names] + [1.0])
 
-        # ====== مونت کارلو با بیمه ======
         n_portfolios = 3000
         n_mc = 1000
         results = np.zeros((5 + len(asset_names_rf), n_portfolios))
@@ -365,6 +373,58 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         st.subheader("📊 داشبورد خلاصه پرتفو")
         show_periodic_risk_return(resampled_prices, best_weights[:-1], "پرتفو بهینه مونت‌کارلو")
         show_periodic_risk_return(resampled_prices, best_cvar_weights[:-1], f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)")
+
+        # ====== مرز کارا و MPT ======
+        ef_results, ef_weights = efficient_frontier(mean_returns, cov_matrix, annual_factor, points=200,
+                                                    min_weights=np.array([min_weights[n] for n in asset_names]),
+                                                    max_weights=np.array([max_weights[n] for n in asset_names]))
+        max_sharpe_idx_ef = np.argmax(ef_results[2])
+        mpt_weights = ef_weights[max_sharpe_idx_ef]
+
+        # نمایش پرتفو MPT
+        st.subheader("📊 پرتفو بهینه بر مبنای مرز کارا (MPT)")
+        pf_prices_mpt = (resampled_prices * mpt_weights).sum(axis=1)
+        pf_returns_mpt = pf_prices_mpt.pct_change().dropna()
+        mean_ann_mpt = pf_returns_mpt.mean() * annual_factor
+        risk_ann_mpt = pf_returns_mpt.std() * (annual_factor ** 0.5)
+        st.markdown(
+            f"""<div dir="rtl" style="text-align:right">
+            <b>سالانه:</b> بازده: {mean_ann_mpt:.2%} | ریسک: {risk_ann_mpt:.2%}<br>
+            <b>وزن پرتفو:</b> {' | '.join([f"{n}: {w:.2%}" for n, w in zip(asset_names, mpt_weights)])}
+            </div>
+            """, unsafe_allow_html=True)
+
+        # نمودار مرز کارا (ترکیبی)
+        fig_all = go.Figure()
+        # مرز کارا
+        fig_all.add_trace(go.Scatter(
+            x=ef_results[0]*100, y=ef_results[1]*100,
+            mode='lines+markers', marker=dict(color='gray', size=5), name='مرز کارا (MPT)'
+        ))
+        # پرتفو بهینه MC
+        fig_all.add_trace(go.Scatter(
+            x=[results[1, best_idx]*100], y=[results[0, best_idx]*100],
+            mode='markers+text', marker=dict(size=14, color='blue', symbol='diamond'),
+            text=["MC"], textposition="top right", name='پرتفو بهینه Monte Carlo'
+        ))
+        # پرتفو بهینه CVaR
+        fig_all.add_trace(go.Scatter(
+            x=[cvar_results[0, best_cvar_idx]*100], y=[cvar_results[1, best_cvar_idx]*100],
+            mode='markers+text', marker=dict(size=14, color='orange', symbol='triangle-up'),
+            text=["CVaR"], textposition="top center", name='پرتفو بهینه CVaR'
+        ))
+        # پرتفو بهینه MPT
+        fig_all.add_trace(go.Scatter(
+            x=[ef_results[0, max_sharpe_idx_ef]*100], y=[ef_results[1, max_sharpe_idx_ef]*100],
+            mode='markers+text', marker=dict(size=16, color='red', symbol='star'),
+            text=["MPT"], textposition="bottom right", name='پرتفو بهینه MPT'
+        ))
+        fig_all.update_layout(
+            title="مرز کارا با نمایش پرتفوهای منتخب (MC, CVaR, MPT)",
+            xaxis_title="ریسک (%)",
+            yaxis_title="بازده (%)"
+        )
+        st.plotly_chart(fig_all, use_container_width=True)
 
         # ====== مقایسه هیستوگرام سود/زیان پرتفو با و بدون بیمه ======
         st.subheader("📉 مقایسه توزیع سود/زیان پرتفو قبل و بعد از بیمه (شبیه‌سازی ۱۰٬۰۰۰ مرتبه)")
@@ -421,4 +481,8 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         """, unsafe_allow_html=True)
         st.info("همانطور که در نمودار مشاهده می‌کنید، **با فعال شدن بیمه، انتهای سمت چپ (دم منفی) توزیع سود/زیان کوتاه‌تر شده و احتمال زیان‌های شدید و مقدار CVaR کاهش یافته است. این یعنی بیمه پورتفو ریسک زیان‌های سنگین را کاهش می‌دهد، حتی اگر مقدار انحراف معیار (ریسک کلی) خیلی تغییر نکند.")
 
-# ========== More analytics and plots as needed ==========
+    except Exception as e:
+        st.error(f"خطای تحلیل پرتفو: {e}")
+
+else:
+    st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price یا Close یا Open را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
