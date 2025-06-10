@@ -293,7 +293,6 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     if not isinstance(prices_df.index, pd.DatetimeIndex):
         prices_df.index = pd.to_datetime(prices_df.index)
 
-    # نمایش روند قیمت
     with st.expander("📈 مشاهده روند قیمت دارایی‌ها", expanded=True):
         st.markdown("""
         <div dir="rtl" style="text-align:right">
@@ -303,14 +302,12 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         """, unsafe_allow_html=True)
         st.line_chart(prices_df.resample(resample_rule).last().dropna())
 
-    # تحلیل بازده و کوواریانس
     resampled_prices = prices_df.resample(resample_rule).last().dropna()
     returns = resampled_prices.pct_change().dropna()
     mean_returns = np.atleast_1d(np.array(returns.mean() * annual_factor))
     cov_matrix = np.atleast_2d(np.array(returns.cov() * annual_factor))
     std_devs = np.atleast_1d(np.sqrt(np.diag(cov_matrix)))
 
-    # اثر بیمه روی کوواریانس (فقط دارایی‌های بیمه شده) و وزن‌دهی
     adjusted_cov = cov_matrix.copy()
     preference_weights = []
     for i, name in enumerate(asset_names):
@@ -324,7 +321,6 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     preference_weights = np.array(preference_weights)
     preference_weights /= np.sum(preference_weights)
 
-    # شبیه‌سازی پرتفوها (MC، CVaR) با نرخ بدون ریسک
     n_portfolios = 3000
     n_mc = 1000
     results = np.zeros((5 + len(asset_names), n_portfolios))
@@ -363,12 +359,10 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     best_cvar_idx = np.argmin(results[4])
     best_cvar_weights = results[5:, best_cvar_idx]
 
-    # مرز کارا با adjusted_cov و نرخ بدون ریسک
     ef_results, ef_weights = efficient_frontier(mean_returns, adjusted_cov, annual_factor, points=400)
     max_sharpe_idx = np.argmax((ef_results[1] - rf) / ef_results[0])
     mpt_weights = ef_weights[max_sharpe_idx]
 
-    # راهنمای سبک ها
     st.markdown("""
     <div dir="rtl" style="text-align:right">
     <b>راهنما:</b>
@@ -380,7 +374,6 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     </div>
     """, unsafe_allow_html=True)
 
-    # داشبورد و نمودارها برای هر سبک
     styles = [
         ("پرتفو بهینه مونت‌کارلو", best_weights, "MC", "red"),
         (f"پرتفو بهینه CVaR ({int(cvar_alpha*100)}%)", best_cvar_weights, "CVaR", "green"),
