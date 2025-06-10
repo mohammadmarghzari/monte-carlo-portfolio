@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 import yfinance as yf
 from collections import Counter
-import empyrical as emp
 
 st.set_page_config(page_title="Portfolio+Options Analyzer", layout="wide")
 
@@ -132,6 +131,33 @@ def calc_options_series(option_rows, prices: pd.Series):
         prev_price = price
     return rets
 
+def sharpe_ratio(returns, risk_free=0, ann_factor=12):
+    excess_ret = returns - risk_free/ann_factor
+    mean = np.mean(excess_ret)
+    std = np.std(excess_ret, ddof=1)
+    if std == 0: return 0
+    return (mean / std) * np.sqrt(ann_factor)
+
+def sortino_ratio(returns, risk_free=0, ann_factor=12):
+    excess_ret = returns - risk_free/ann_factor
+    mean = np.mean(excess_ret)
+    neg_returns = excess_ret[excess_ret < 0]
+    downside_std = np.std(neg_returns, ddof=1) if len(neg_returns) > 0 else 0.0001
+    return (mean / downside_std) * np.sqrt(ann_factor)
+
+def annual_volatility(returns, ann_factor=12):
+    return np.std(returns, ddof=1) * np.sqrt(ann_factor)
+
+def annual_return(returns, ann_factor=12):
+    compounded = np.prod(1 + returns) ** (ann_factor / len(returns)) - 1
+    return compounded
+
+def max_drawdown(returns):
+    cumulative = np.cumprod(1 + returns)
+    peak = np.maximum.accumulate(cumulative)
+    drawdown = (cumulative - peak) / peak
+    return np.min(drawdown)
+
 def efficient_frontier(mean_returns, cov_matrix, points=200, min_weights=None, max_weights=None):
     num_assets = len(mean_returns)
     results = np.zeros((3, points))
@@ -153,22 +179,7 @@ def efficient_frontier(mean_returns, cov_matrix, points=200, min_weights=None, m
         weight_record.append(weights)
     return results, np.array(weight_record)
 
-def portfolio_risk_return(resampled_returns, weights, freq_label="M"):
-    pf_returns = resampled_returns @ weights
-    if freq_label == "M":
-        ann_factor = 12
-    elif freq_label == "W":
-        ann_factor = 52
-    else:
-        ann_factor = 1
-    mean_month = pf_returns.mean()
-    risk_month = pf_returns.std()
-    mean_ann = mean_month * ann_factor
-    risk_ann = risk_month * (ann_factor ** 0.5)
-    return mean_month, risk_month, mean_ann, risk_ann
-
-def calc_asset_stats(prices: pd.Series, freq='M'):
-    returns = prices.pct_change().dropna()
+def calc_asset_stats(prices: pd.Series, freq='M', risk_free=0):
     if freq == 'M':
         returns = prices.resample('M').last().pct_change().dropna()
         ann_factor = 12
@@ -182,20 +193,20 @@ def calc_asset_stats(prices: pd.Series, freq='M'):
         returns = prices.resample(freq).last().pct_change().dropna()
         ann_factor = 12
 
-    sharpe = emp.sharpe_ratio(returns, annualization=ann_factor)
-    sortino = emp.sortino_ratio(returns, annualization=ann_factor)
-    volatility = emp.annual_volatility(returns, annualization=ann_factor)
-    total_return = emp.annual_return(returns, annualization=ann_factor)
-    implied_vol = returns.std() * np.sqrt(ann_factor)
-    max_drawdown = emp.max_drawdown(returns)
-    mean_ann = returns.mean() * ann_factor
-    mean_month = returns.mean()
-    std_ann = returns.std() * np.sqrt(ann_factor)
-    std_month = returns.std()
-    min_ann = returns.min() * ann_factor
-    max_ann = returns.max() * ann_factor
-    min_month = returns.min()
-    max_month = returns.max()
+    sharpe = sharpe_ratio(returns, risk_free, ann_factor)
+    sortino = sortino_ratio(returns, risk_free, ann_factor)
+    volatility = annual_volatility(returns, ann_factor)
+    total_return = annual_return(returns, ann_factor)
+    implied_vol = np.std(returns, ddof=1) * np.sqrt(ann_factor)
+    maxdd = max_drawdown(returns)
+    mean_ann = np.mean(returns) * ann_factor
+    mean_month = np.mean(returns)
+    std_ann = np.std(returns, ddof=1) * np.sqrt(ann_factor)
+    std_month = np.std(returns, ddof=1)
+    min_ann = np.min(returns) * ann_factor
+    max_ann = np.max(returns) * ann_factor
+    min_month = np.min(returns)
+    max_month = np.max(returns)
 
     return {
         "sharpe": sharpe,
@@ -211,7 +222,7 @@ def calc_asset_stats(prices: pd.Series, freq='M'):
         "max_ann": max_ann,
         "min_month": min_month,
         "max_month": max_month,
-        "max_drawdown": max_drawdown,
+        "max_drawdown": maxdd,
         "returns": returns
     }
 
@@ -330,7 +341,7 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     asset_stats = {}
     for name in asset_names:
         s = resampled_prices[name]
-        asset_stats[name] = calc_asset_stats(s, freq=resample_rule)
+        asset_stats[name] = calc_asset_stats(s, freq=resample_rule, risk_free=user_rf)
     st.write(pd.DataFrame(asset_stats).T[[
         'sharpe','sortino','volatility_ann','total_return_ann','implied_vol',
         'mean_ann','mean_month','std_ann','std_month','min_ann','min_month','max_ann','max_month'
