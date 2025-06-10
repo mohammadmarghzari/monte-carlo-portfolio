@@ -482,4 +482,4 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         st.error(f"خطای تحلیل پرتفو: {e}")
 
 else:
-    st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price یا Close یا Open را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
+    st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price یا Close یا Open را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.") 
