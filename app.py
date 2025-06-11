@@ -5,8 +5,13 @@ import plotly.graph_objects as go
 import plotly.express as px
 import yfinance as yf
 from collections import Counter
+from statsmodels.tsa.arima.model import ARIMA
+from arch import arch_model
+import uuid
+import warnings
+warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title="Portfolio+Options Analyzer", layout="wide")
+st.set_page_config(page_title="شبیه‌ساز پرتفوی کریپتو و بازار سهام", layout="wide")
 
 # ---------- Helper Functions ----------
 
@@ -158,12 +163,19 @@ def max_drawdown(returns):
     drawdown = (cumulative - peak) / peak
     return np.min(drawdown)
 
+def var(returns, alpha=0.95):
+    return np.percentile(returns, (1-alpha)*100)
+
+def cvar(returns, alpha=0.95):
+    var_value = var(returns, alpha)
+    return returns[returns <= var_value].mean() if np.any(returns <= var_value) else var_value
+
 def efficient_frontier(mean_returns, cov_matrix, points=200, min_weights=None, max_weights=None):
     num_assets = len(mean_returns)
     results = np.zeros((3, points))
     weight_record = []
     for i in range(points):
-        for _ in range(100):  # try 100 times to generate valid weights
+        for _ in range(100):
             w = np.random.dirichlet(np.ones(num_assets), size=1)[0]
             if min_weights is not None:
                 if not np.all(w >= min_weights): continue
@@ -207,6 +219,8 @@ def calc_asset_stats(prices: pd.Series, freq='M', risk_free=0):
     max_ann = np.max(returns) * ann_factor
     min_month = np.min(returns)
     max_month = np.max(returns)
+    var_95 = var(returns, 0.95)
+    cvar_95 = cvar(returns, 0.95)
 
     return {
         "sharpe": sharpe,
@@ -223,8 +237,39 @@ def calc_asset_stats(prices: pd.Series, freq='M', risk_free=0):
         "min_month": min_month,
         "max_month": max_month,
         "max_drawdown": maxdd,
+        "var_95": var_95,
+        "cvar_95": cvar_95,
         "returns": returns
     }
+
+def forecast_prices(prices: pd.Series, horizons=[1, 3, 6]):
+    returns = prices.pct_change().dropna()
+    forecasts = {}
+    for horizon in horizons:
+        try:
+            # ARIMA for trend
+            arima_model = ARIMA(returns, order=(1,1,1))
+            arima_fit = arima_model.fit()
+            arima_forecast = arima_fit.forecast(steps=horizon)
+            # GARCH for volatility
+            garch_model = arch_model(returns, vol='Garch', p=1, q=1)
+            garch_fit = garch_model.fit(disp='off')
+            garch_forecast = garch_fit.forecast(horizon=horizon)
+            variance = garch_forecast.variance.values[-1]
+            # Convert returns to prices
+            last_price = prices.iloc[-1]
+            forecast_price = last_price * np.prod(1 + arima_forecast)
+            conf_int = [
+                forecast_price * np.exp(-1.96 * np.sqrt(variance.sum())),
+                forecast_price * np.exp(1.96 * np.sqrt(variance.sum()))
+            ]
+            forecasts[horizon] = {
+                'price': forecast_price,
+                'conf_int': conf_int
+            }
+        except:
+            forecasts[horizon] = {'price': prices.iloc[-1], 'conf_int': [prices.iloc[-1]*0.9, prices.iloc[-1]*1.1]}
+    return forecasts
 
 # ---------- Session State ----------
 if "downloaded_dfs" not in st.session_state:
@@ -235,6 +280,8 @@ if "option_rows" not in st.session_state:
     st.session_state["option_rows"] = {}
 if "investment_amount" not in st.session_state:
     st.session_state["investment_amount"] = 10000.0
+if "hedge_status" not in st.session_state:
+    st.session_state["hedge_status"] = {}
 
 # ---------- Sidebar: Uploads and Download ----------
 st.sidebar.header("📂 بارگذاری فایل دارایی‌ها (CSV)")
@@ -292,7 +339,7 @@ st.sidebar.markdown("---")
 investment_amount = st.sidebar.number_input("💵 سرمایه کل (دلار)", min_value=0.0, value=float(st.session_state["investment_amount"]), step=100.0)
 st.session_state["investment_amount"] = investment_amount
 
-# ---------- حداقل و حداکثر وزن دارایی ها ----------
+# ---------- Minimum and Maximum Weight Constraints ----------
 min_weights = []
 max_weights = []
 asset_names = []
@@ -317,7 +364,7 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
 
 # ---------- Main Analysis ----------
 if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
-    # 1- آماده‌سازی دیتافریم قیمتی
+    # 1- Prepare Price DataFrame
     name_counter = Counter()
     df_list = []
     asset_names = []
@@ -336,68 +383,36 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         prices_df.index = pd.to_datetime(prices_df.index)
     resampled_prices = prices_df.resample(resample_rule).last().dropna()
 
-    # 2- آمار و نسبت‌ها برای هر دارایی
-    st.markdown("## آمار کلیدی دارایی‌ها")
+    # 2- Asset Statistics
+    st.markdown("## 📈 آمار کلیدی دارایی‌ها")
+    st.markdown("این بخش آمار کلیدی مانند شارپ، سورتینو، نوسانات سالانه، بازده کل، و حداکثر افت سرمایه را برای هر دارایی نمایش می‌دهد.")
     asset_stats = {}
     for name in asset_names:
         s = resampled_prices[name]
         asset_stats[name] = calc_asset_stats(s, freq=resample_rule, risk_free=user_rf)
-    st.write(pd.DataFrame(asset_stats).T[[
-        'sharpe','sortino','volatility_ann','total_return_ann','implied_vol',
-        'mean_ann','mean_month','std_ann','std_month','min_ann','min_month','max_ann','max_month'
-    ]])
+    stats_df = pd.DataFrame(asset_stats).T[[
+        'sharpe', 'sortino', 'volatility_ann', 'total_return_ann', 'implied_vol',
+        'mean_ann', 'mean_month', 'std_ann', 'std_month', 'min_ann', 'min_month',
+        'max_ann', 'max_month', 'var_95', 'cvar_95'
+    ]]
+    st.write(stats_df)
 
-    # استخراج لیست آمارها
-    sharpe_list = [v['sharpe'] for v in asset_stats.values()]
-    sortino_list = [v['sortino'] for v in asset_stats.values()]
-    mean_ann_list = [v['mean_ann'] for v in asset_stats.values()]
-    mean_month_list = [v['mean_month'] for v in asset_stats.values()]
-    std_ann_list = [v['std_ann'] for v in asset_stats.values()]
-    std_month_list = [v['std_month'] for v in asset_stats.values()]
-    max_ann_list = [v['max_ann'] for v in asset_stats.values()]
-    min_ann_list = [v['min_ann'] for v in asset_stats.values()]
-    max_month_list = [v['max_month'] for v in asset_stats.values()]
-    min_month_list = [v['min_month'] for v in asset_stats.values()]
-
-    stats_summary = {
-        "min_sharpe": np.min(sharpe_list),
-        "max_sharpe": np.max(sharpe_list),
-        "mean_sharpe": np.mean(sharpe_list),
-
-        "min_sortino": np.min(sortino_list),
-        "max_sortino": np.max(sortino_list),
-        "mean_sortino": np.mean(sortino_list),
-
-        "min_ann_return": np.min(min_ann_list),
-        "max_ann_return": np.max(max_ann_list),
-        "mean_ann_return": np.mean(mean_ann_list),
-
-        "min_month_return": np.min(min_month_list),
-        "max_month_return": np.max(max_month_list),
-        "mean_month_return": np.mean(mean_month_list),
-
-        "min_ann_vol": np.min(std_ann_list),
-        "max_ann_vol": np.max(std_ann_list),
-        "mean_ann_vol": np.mean(std_ann_list),
-
-        "min_month_vol": np.min(std_month_list),
-        "max_month_vol": np.max(std_month_list),
-        "mean_month_vol": np.mean(std_month_list),
-    }
-
-    st.markdown("### خلاصه آماری پرتفو")
-    for k, v in stats_summary.items():
-        st.markdown(f"{k}: <b>{v:.3f}</b>", unsafe_allow_html=True)
-
-    # 3- تعریف معاملات آپشن برای هر دارایی
-    st.markdown("## ⚙️ تنظیمات معاملات آپشن و بیمه برای هر دارایی")
-    st.markdown("برای هر دارایی می‌توانید ترکیبی از خرید/فروش دارایی و اختیار خرید/فروش (کال/پوت) تعریف کنید.")
-    st.info("برای بیمه کلاسیک، کافیست 'خرید دارایی' (با حجم مناسب) و 'خرید پوت' (با قیمت اعمال، پریمیوم و حجم مناسب) وارد کنید.")
+    # 3- Options and Hedging Configuration
+    st.markdown("## ⚙️ تنظیمات معاملات آپشن و بیمه")
+    st.markdown("برای هر دارایی می‌توانید معاملات آپشن (خرید/فروش کال/پوت) تعریف کنید یا گزینه بیمه را فعال کنید تا یک پوت محافظتی اضافه شود.")
     option_rows_dict = {}
     for name in asset_names:
-        with st.expander(f"⚙️ معاملات {name}", expanded=True):
+        with st.expander(f"⚙️ معاملات و بیمه {name}", expanded=True):
+            hedge = st.checkbox(f"فعال‌سازی بیمه برای {name}", key=f"hedge_{name}")
+            st.session_state["hedge_status"][name] = hedge
             opt_rows = []
-            for i in range(3): # تا ۳ ردیف آپشن
+            if hedge:
+                current_price = resampled_prices[name].iloc[-1]
+                strike = current_price * 0.9  # 90% of current price
+                premium = strike * 0.05  # 5% of strike as premium
+                opt_rows.append(('خرید پوت', strike, premium, 1))
+                st.info(f"بیمه فعال: خرید پوت با قیمت اعمال {format_money(strike)} و پریمیوم {format_money(premium)}")
+            for i in range(3):
                 c1, c2, c3, c4 = st.columns([2,2,2,2])
                 with c1:
                     row_type = st.selectbox("نوع معامله", ['-', 'خرید دارایی', 'فروش دارایی', 'خرید کال', 'فروش کال', 'خرید پوت', 'فروش پوت'],
@@ -411,10 +426,9 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
                 if row_type != '-' and qty != 0:
                     opt_rows.append((row_type, strike, premium, qty))
             option_rows_dict[name] = opt_rows
-
     st.session_state["option_rows"] = option_rows_dict.copy()
 
-    # 4- ساخت سری زمانی بازده آپشن + دارایی پایه
+    # 4- Calculate Returns with Options/Hedging
     returns_dict = {}
     for name in asset_names:
         price = resampled_prices[name]
@@ -424,132 +438,133 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             returns_dict[name] = ret_option
         else:
             returns_dict[name] = price.pct_change().fillna(0)
-
     returns_df = pd.DataFrame(returns_dict).dropna()
 
-    # 5- تحلیل پرتفو (شبیه‌سازی با محدودیت وزن)
+    # 5- Portfolio Simulations
+    st.markdown("## 📊 شبیه‌سازی‌های پرتفوی")
+    st.markdown("این بخش پنج روش شبیه‌سازی (مونت‌کارلو، VaR، CVaR، MPT، وزن برابر) را اجرا کرده و مرز کارا و تخصیص بهینه را نمایش می‌دهد.")
     mean_returns = returns_df.mean() * annual_factor
     cov_matrix = returns_df.cov() * annual_factor
-
     n_portfolios = 2500
-    all_risks, all_returns, all_weights, all_sharpes, all_cvars = [], [], [], [], []
-    cvar_alpha = 0.95
+    simulation_methods = {
+        'Monte Carlo': {'metric': 'sharpe', 'color': 'Viridis', 'opt_crit': lambda x: np.argmax(x['sharpe'])},
+        'VaR': {'metric': 'var_95', 'color': 'Plasma', 'opt_crit': lambda x: np.argmin(x['var_95'])},
+        'CVaR': {'metric': 'cvar_95', 'color': 'Inferno', 'opt_crit': lambda x: np.argmin(x['cvar_95'])},
+        'MPT': {'metric': 'sharpe', 'color': 'Viridis', 'opt_crit': lambda x: np.argmax(x['sharpe'])},
+        'Equal Weight': {'metric': 'sharpe', 'color': 'Blues', 'opt_crit': lambda x: 0}
+    }
 
-    for i in range(n_portfolios):
-        valid = False
-        for _ in range(100):
-            ws = np.random.dirichlet(np.ones(len(asset_names)), size=1)[0]
-            if np.all(ws >= min_weights) and np.all(ws <= max_weights):
-                valid = True
-                break
-        if not valid:
-            continue
-        port_return = np.dot(ws, mean_returns)
-        port_std = np.sqrt(np.dot(ws.T, np.dot(cov_matrix, ws)))
-        port_series = returns_df @ ws
-        sharpe = (port_return - user_rf) / port_std if port_std > 0 else 0
-        # CVaR
-        sim_returns = port_series
-        var = np.percentile(sim_returns, (1-cvar_alpha)*100)
-        cvar = sim_returns[sim_returns <= var].mean() if np.any(sim_returns <= var) else var
-        all_risks.append(port_std)
-        all_returns.append(port_return)
-        all_weights.append(ws)
-        all_sharpes.append(sharpe)
-        all_cvars.append(-cvar)
-    all_risks = np.array(all_risks)
-    all_returns = np.array(all_returns)
-    all_weights = np.array(all_weights)
-    all_sharpes = np.array(all_sharpes)
-    all_cvars = np.array(all_cvars)
+    for method, config in simulation_methods.items():
+        all_risks, all_returns, all_weights, all_metrics = [], [], [], []
+        cvar_alpha = 0.95
+        if method == 'Equal Weight':
+            weights = np.ones(len(asset_names)) / len(asset_names)
+            if np.all(weights >= min_weights) and np.all(weights <= max_weights):
+                port_return = np.dot(weights, mean_returns)
+                port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+                port_series = returns_df @ weights
+                sharpe = (port_return - user_rf) / port_std if port_std > 0 else 0
+                var_95 = var(port_series, cvar_alpha)
+                cvar_95 = cvar(port_series, cvar_alpha)
+                all_risks.append(port_std)
+                all_returns.append(port_return)
+                all_weights.append(weights)
+                all_metrics.append(sharpe if config['metric'] == 'sharpe' else -var_95 if config['metric'] == 'var_95' else -cvar_95)
+        else:
+            for i in range(n_portfolios):
+                valid = False
+                for _ in range(100):
+                    ws = np.random.dirichlet(np.ones(len(asset_names)), size=1)[0]
+                    if np.all(ws >= min_weights) and np.all(ws <= max_weights):
+                        valid = True
+                        break
+                if not valid:
+                    continue
+                port_return = np.dot(ws, mean_returns)
+                port_std = np.sqrt(np.dot(ws.T, np.dot(cov_matrix, ws)))
+                port_series = returns_df @ ws
+                sharpe = (port_return - user_rf) / port_std if port_std > 0 else 0
+                var_95 = var(port_series, cvar_alpha)
+                cvar_95 = cvar(port_series, cvar_alpha)
+                all_risks.append(port_std)
+                all_returns.append(port_return)
+                all_weights.append(ws)
+                all_metrics.append(sharpe if config['metric'] == 'sharpe' else -var_95 if config['metric'] == 'var_95' else -cvar_95)
 
-    # چک آرایه خالی
-    if len(all_sharpes) == 0 or len(all_risks) == 0 or len(all_returns) == 0:
-        st.error("هیچ پرتفوی معتبری با محدودیت‌های فعلی پیدا نشد! محدودیت وزن‌ها را بررسی کنید یا داده ورودی را تغییر دهید.")
-        st.stop()
+        all_risks = np.array(all_risks)
+        all_returns = np.array(all_returns)
+        all_weights = np.array(all_weights)
+        all_metrics = np.array(all_metrics)
 
-    # مرز کارا (با محدودیت وزن)
-    ef_results, ef_weight_arr = efficient_frontier(mean_returns, cov_matrix, points=300, min_weights=min_weights, max_weights=max_weights)
+        # Efficient Frontier Plot
+        st.markdown(f"### مرز کارا - {method}")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=all_risks*100, y=all_returns*100,
+            mode='markers',
+            marker=dict(
+                color=all_metrics, colorscale=config['color'], colorbar=dict(title=config['metric'].upper()),
+                size=7, line=dict(width=0)
+            ),
+            name='پرتفوی‌ها',
+            hovertemplate=f'ریسک: %{{x:.2f}}٪<br>بازده: %{{y:.2f}}٪<br>{config["metric"].upper()}: %{{marker.color:.2f}}<extra></extra>'
+        ))
+        if method == 'MPT':
+            max_sharpe_idx = config['opt_crit']({'sharpe': all_metrics})
+            sharpe_star = all_metrics[max_sharpe_idx]
+            max_risk = all_risks.max() * 1.3 * 100
+            cal_x = np.linspace(0, max_risk, 100)
+            cal_y = user_rf*100 + sharpe_star * cal_x
+            fig.add_trace(go.Scatter(
+                x=cal_x, y=cal_y, mode='lines',
+                line=dict(dash='dash', color='red'), name='خط بازار سرمایه (CAL)'
+            ))
+        opt_idx = config['opt_crit']({'sharpe': all_metrics, 'var_95': all_metrics, 'cvar_95': all_metrics})
+        fig.add_trace(go.Scatter(
+            x=[all_risks[opt_idx]*100], y=[all_returns[opt_idx]*100],
+            mode='markers+text', marker=dict(size=14, color='red'),
+            text=[f"بهینه {method}"], textposition="top right", name=f"پرتفوی بهینه {method}"
+        ))
+        fig.update_layout(
+            title=f"مرز کارا - {method}",
+            xaxis_title="ریسک (%)",
+            yaxis_title="بازده (%)",
+            legend=dict(x=0.01, y=0.99, bgcolor='rgba(0,0,0,0)')
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    # 6- پیدا کردن پرتفو بهینه‌ها
-    max_sharpe_idx = np.argmax(all_sharpes)
-    min_risk_idx = np.argmin(all_risks)
-    max_return_idx = np.argmax(all_returns)
-    best_cvar_idx = np.argmin(all_cvars)
+        # Pie Chart for Optimal Portfolio
+        st.markdown(f"### تخصیص دارایی - {method}")
+        weights = all_weights[opt_idx]
+        dollar_vals = weights * st.session_state["investment_amount"]
+        cols = st.columns(len(asset_names))
+        for i, name in enumerate(asset_names):
+            percent = weights[i]
+            dollar = dollar_vals[i]
+            with cols[i]:
+                st.markdown(f"""
+                <div style='text-align:center;direction:rtl'>
+                <b>{name}</b><br>
+                {format_percent(percent)}<br>
+                {format_money(dollar)}
+                </div>
+                """, unsafe_allow_html=True)
+        figpie = px.pie(
+            values=dollar_vals,
+            names=asset_names,
+            title=f"توزیع دلاری پرتفوی بهینه - {method}",
+            hole=0.4
+        )
+        st.plotly_chart(figpie, use_container_width=True)
 
-    bests = [
-        ("بهینه شارپ", all_weights[max_sharpe_idx], all_risks[max_sharpe_idx], all_returns[max_sharpe_idx], "red"),
-        ("کم‌ریسک‌ترین", all_weights[min_risk_idx], all_risks[min_risk_idx], all_returns[min_risk_idx], "blue"),
-        ("پر بازده‌ترین", all_weights[max_return_idx], all_risks[max_return_idx], all_returns[max_return_idx], "green"),
-    ]
-
-    # 7- نمودار مرز کارا حرفه‌ای + خط بازار سرمایه و Sharpe
-    st.markdown("## 📊 مرز کارا و تحلیل پرتفو (Sharpe Ratio)")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=all_risks*100, y=all_returns*100,
-        mode='markers',
-        marker=dict(
-            color=all_sharpes, colorscale='Viridis', colorbar=dict(title='SharpeRatio'),
-            size=7, line=dict(width=0)
-        ),
-        name='Portfolios',
-        hovertemplate='ریسک: %{x:.2f}٪<br>بازده: %{y:.2f}٪<br>Sharpe: %{marker.color:.2f}<extra></extra>'
-    ))
-    max_risk = all_risks.max() * 1.3 * 100
-    sharpe_star = all_sharpes[max_sharpe_idx]
-    cal_x = np.linspace(0, max_risk, 100)
-    cal_y = user_rf*100 + sharpe_star * cal_x
-    fig.add_trace(go.Scatter(
-        x=cal_x, y=cal_y, mode='lines',
-        line=dict(dash='dash', color='red'), name='خط بازار سرمایه (CAL)'
-    ))
-    fig.add_trace(go.Scatter(
-        x=[all_risks[max_sharpe_idx]*100], y=[all_returns[max_sharpe_idx]*100],
-        mode='markers+text', marker=dict(size=14, color='red'),
-        text=["بهینه"], textposition="top right", name="پرتفوی بهینه"
-    ))
-    fig.update_layout(
-        title="مرزکارا با رنگ‌بندی Sharpe Ratio",
-        xaxis_title="ریسک (%)",
-        yaxis_title="بازده (%)",
-        legend=dict(x=0.01, y=0.99, bgcolor='rgba(0,0,0,0)')
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # --- نمودار CVaR
-    st.markdown(f"## CVaR نمودار ریسک-بازده پرتفوی‌ها با رنگ ({int(cvar_alpha*100)}%)")
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(
-        x=all_risks*100, y=all_returns*100,
-        mode='markers',
-        marker=dict(
-            color=all_cvars, colorscale='Inferno', colorbar=dict(title='-CVaR'),
-            size=7, line=dict(width=0)
-        ),
-        name='CVaR Portfolios',
-        hovertemplate='ریسک: %{x:.2f}٪<br>بازده: %{y:.2f}٪<br>-CVaR: %{marker.color:.2f}<extra></extra>'
-    ))
-    fig2.add_trace(go.Scatter(
-        x=[all_risks[best_cvar_idx]*100], y=[all_returns[best_cvar_idx]*100],
-        mode='markers+text', marker=dict(size=14, color='lime'),
-        text=["بهینه CVaR"], textposition="bottom right", name="پرتفوی بهینه CVaR"
-    ))
-    fig2.update_layout(
-        title=f"نمودار CVaR ({int(cvar_alpha*100)}%) ریسک-بازده پرتفوی‌ها با رنگ",
-        xaxis_title="ریسک (%)",
-        yaxis_title="بازده (%)",
-        legend=dict(x=0.01, y=0.99, bgcolor='rgba(0,0,0,0)')
-    )
-    st.plotly_chart(fig2, use_container_width=True)
-
-    # 8- نمایش ترکیب پرتفو بهینه و ابزار تعاملی PnL نقطه‌ای برای هر دارایی
-    st.markdown("## 🔎 ترکیب و سود/زیان نقطه‌ای هر دارایی")
+    # 6- Profit and Loss Charts
+    st.markdown("## 📉 نمودارهای سود و زیان (PnL)")
+    st.markdown("این بخش نمودار سود و زیان استراتژی‌های آپشن (شامل بیمه) را برای هر دارایی نمایش می‌دهد.")
     for name in asset_names:
         opt_rows = option_rows_dict.get(name, [])
         st.markdown(f"### {name}")
         if opt_rows:
-            with st.expander("نمایش نمودار سود/زیان نقطه‌ای این استراتژی (PnL Option)", expanded=False):
+            with st.expander("نمایش نمودار سود/زیان نقطه‌ای این استراتژی", expanded=False):
                 asset_price = resampled_prices[name].iloc[-1]
                 display_price = st.number_input(f"قیمت دارایی در سررسید ({name})", value=float(asset_price), key=f"display_price_{name}")
                 price_range = np.linspace(asset_price * 0.7, asset_price * 1.3, 500)
@@ -592,29 +607,30 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
         else:
             st.info("برای این دارایی معامله‌ای تعریف نشده است (صرفاً بازده دارایی پایه لحاظ می‌شود).")
 
-    # 9- نمایش وزن دلاری و دایره ای پرتفو بهینه (شارپ)
-    st.markdown("## 💰 وزن دلاری پرتفو بهینه (شارپ)")
-    weights = bests[0][1]
-    dollar_vals = weights * st.session_state["investment_amount"]
-    cols = st.columns(len(asset_names))
-    for i, name in enumerate(asset_names):
-        percent = weights[i]
-        dollar = dollar_vals[i]
-        with cols[i]:
-            st.markdown(f"""
-            <div style='text-align:center;direction:rtl'>
-            <b>{name}</b><br>
-            {format_percent(percent)}<br>
-            {format_money(dollar)}
-            </div>
-            """, unsafe_allow_html=True)
-    figpie = px.pie(
-        values=dollar_vals,
-        names=asset_names,
-        title="توزیع دلاری پرتفو بهینه (شارپ)",
-        hole=0.4
-    )
-    st.plotly_chart(figpie, use_container_width=True)
+    # 7- Price Forecasting
+    st.markdown("## 🔮 پیش‌بینی قیمت دارایی‌ها")
+    st.markdown("این بخش پیش‌بینی قیمت برای بازه‌های ۱، ۳ و ۶ ماهه را با استفاده از مدل ARIMA-GARCH نمایش می‌دهد.")
+    forecast_horizons = [1, 3, 6]
+    for name in asset_names:
+        st.markdown(f"### پیش‌بینی برای {name}")
+        forecasts = forecast_prices(resampled_prices[name], horizons=forecast_horizons)
+        fig = go.Figure()
+        last_price = resampled_prices[name].iloc[-1]
+        fig.add_trace(go.Scatter(x=[0], y=[last_price], mode='markers', name='قیمت فعلی', marker=dict(size=10, color='blue')))
+        for horizon in forecast_horizons:
+            f = forecasts[horizon]
+            fig.add_trace(go.Scatter(x=[horizon], y=[f['price']], mode='markers+text',
+                                     text=[f"{f['price']:.2f} $"], textposition="top center",
+                                     name=f'{horizon} ماه', marker=dict(size=8)))
+            fig.add_trace(go.Scatter(x=[horizon, horizon], y=f['conf_int'], mode='lines',
+                                     line=dict(color='gray', dash='dash'), name=f'بازه اطمینان {horizon} ماه'))
+        fig.update_layout(
+            title=f"پیش‌بینی قیمت {name}",
+            xaxis_title="افق زمانی (ماه)",
+            yaxis_title="قیمت پیش‌بینی‌شده ($)",
+            template="plotly_white"
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
 else:
     st.warning("⚠️ لطفاً فایل‌های CSV شامل ستون‌های Date و Price یا Close یا Open را آپلود کنید یا از بخش دانلود آنلاین داده استفاده کنید.")
