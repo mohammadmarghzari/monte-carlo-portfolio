@@ -547,7 +547,7 @@ with tabs[1]:
         st.session_state["option_rows"] = option_rows_dict.copy()
 
         if st.button("🔄 به‌روزرسانی"):
-            st.experimental_rerun()
+            st.rerun()  # تغییر از experimental_rerun به rerun
 
 with tabs[2]:
     if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
