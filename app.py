@@ -390,8 +390,13 @@ with st.sidebar.expander("تنظیمات کلی ⚙️"):
     resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'هفتگی': 'W'}[period]
     annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'هفتگی': 52}[period]
     user_rf = st.number_input("نرخ بدون ریسک سالانه (%)", value=3.0, key="user_rf")
-    investment_amount = st.number_input("💵 سرمایه کل (دلار)", value=float(st.session_state["investment_amount"]), key="investment_amount")
-    st.session_state["investment_amount"] = investment_amount
+
+    # Use a form to safely handle investment_amount update
+    with st.form(key="settings_form"):
+        investment_amount = st.number_input("💵 سرمایه کل (دلار)", value=float(st.session_state["investment_amount"]), key="investment_amount_input")
+        submit_button = st.form_submit_button(label="ثبت")
+    if submit_button:
+        st.session_state["investment_amount"] = investment_amount
 
 # ---------- Minimum and Maximum Weight Constraints ----------
 min_weights = []
