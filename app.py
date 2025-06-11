@@ -7,7 +7,6 @@ import yfinance as yf
 from collections import Counter
 from statsmodels.tsa.arima.model import ARIMA
 from arch import arch_model
-import uuid
 import warnings
 warnings.filterwarnings('ignore')
 
