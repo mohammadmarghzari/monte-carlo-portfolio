@@ -398,19 +398,11 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
 
     # 3- Options and Hedging Configuration
     st.markdown("## ⚙️ تنظیمات معاملات آپشن و بیمه")
-    st.markdown("برای هر دارایی می‌توانید معاملات آپشن (خرید/فروش کال/پوت) تعریف کنید یا گزینه بیمه را فعال کنید تا یک پوت محافظتی اضافه شود.")
+    st.markdown("برای هر دارایی می‌توانید استراتژی معاملات (مثل خرید دارایی پایه، خرید/فروش کال/پوت) را به صورت دستی تعریف کنید.")
     option_rows_dict = {}
     for name in asset_names:
-        with st.expander(f"⚙️ معاملات و بیمه {name}", expanded=True):
-            hedge = st.checkbox(f"فعال‌سازی بیمه برای {name}", key=f"hedge_{name}")
-            st.session_state["hedge_status"][name] = hedge
+        with st.expander(f"⚙️ معاملات {name}", expanded=True):
             opt_rows = []
-            if hedge:
-                current_price = resampled_prices[name].iloc[-1]
-                strike = st.number_input(f"قیمت اعمال پوت محافظتی ({name})", value=current_price * 0.9, key=f"strike_hedge_{name}")
-                premium = st.number_input(f"پریمیوم پوت محافظتی ({name})", value=strike * 0.05, key=f"premium_hedge_{name}")
-                opt_rows.append(('خرید پوت', strike, premium, 1))
-                st.info(f"بیمه فعال: خرید پوت با قیمت اعمال {format_money(strike)} و پریمیوم {format_money(premium)}")
             for i in range(3):
                 c1, c2, c3, c4 = st.columns([2,2,2,2])
                 with c1:
@@ -558,7 +550,7 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
 
     # 6- Profit and Loss Charts
     st.markdown("## 📉 نمودارهای سود و زیان (PnL)")
-    st.markdown("این بخش نمودار سود و زیان استراتژی‌های آپشن (شامل بیمه) را برای هر دارایی نمایش می‌دهد.")
+    st.markdown("این بخش نمودار سود و زیان استراتژی‌های آپشن را برای هر دارایی نمایش می‌دهد.")
     for name in asset_names:
         opt_rows = option_rows_dict.get(name, [])
         st.markdown(f"### {name}")
@@ -604,7 +596,7 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
                                    template="plotly_white", height=370)
                 st.plotly_chart(fig2, use_container_width=True)
         else:
-            st.info("برای این دارایی معامله‌ای تعریف نشده است (صرفاً بازده دارایی پایه لحاظ می‌شود).")
+            st.info("برای این دارایی استراتژی‌ای تعریف نشده است (صرفاً بازده دارایی پایه لحاظ می‌شود).")
 
     # 7- Price Forecasting
     st.markdown("## 🔮 پیش‌بینی قیمت دارایی‌ها")
