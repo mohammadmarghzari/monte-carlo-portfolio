@@ -175,7 +175,7 @@ def calc_option_return(row_type, price, prev_price, strike, premium, qty):
     elif row_type == 'فروش پوت':
         return (premium - max(strike - price, 0)) / prev_price if prev_price != 0 else 0
     elif row_type == 'فروش فیوچرز':
-        return (prev_price - price) / prev_price if prev_price != 0 else 0  # شبیه‌سازی ساده
+        return (prev_price - price) / prev_price if prev_price != 0 else 0
     else:
         return 0
 
@@ -192,27 +192,40 @@ def calc_options_series(option_rows, prices: pd.Series):
         prev_price = price
     return rets
 
-def calculate_payoff(option_rows, current_price, price_range):
+def calculate_payoff(option_rows, current_price, purchase_price, price_range):
     payoffs = []
+    total_premium = sum(qty * premium * purchase_price for _, _, premium, qty in option_rows if premium != 0)
     for price in price_range:
         total_payoff = 0
         for row_type, strike, premium, qty in option_rows:
             if row_type == 'خرید دارایی':
-                total_payoff += qty * (price - current_price)
+                total_payoff += qty * (price - purchase_price)
             elif row_type == 'فروش دارایی':
-                total_payoff += qty * (current_price - price)
+                total_payoff += qty * (purchase_price - price)
             elif row_type == 'خرید کال':
-                total_payoff += qty * (max(price - strike, 0) - premium * current_price)
+                total_payoff += qty * (max(price - strike, 0) - premium * purchase_price)
             elif row_type == 'فروش کال':
-                total_payoff += qty * (premium * current_price - max(price - strike, 0))
+                total_payoff += qty * (premium * purchase_price - max(price - strike, 0))
             elif row_type == 'خرید پوت':
-                total_payoff += qty * (max(strike - price, 0) - premium * current_price)
+                total_payoff += qty * (max(strike - price, 0) - premium * purchase_price)
             elif row_type == 'فروش پوت':
-                total_payoff += qty * (premium * current_price - max(strike - price, 0))
+                total_payoff += qty * (premium * purchase_price - max(strike - price, 0))
             elif row_type == 'فروش فیوچرز':
-                total_payoff += qty * (current_price - price)
-        payoffs.append(total_payoff)
+                total_payoff += qty * (purchase_price - price)
+        payoffs.append(total_payoff - total_premium)
     return payoffs
+
+def calculate_breakeven(option_rows, purchase_price):
+    total_premium = sum(qty * premium * purchase_price for _, _, premium, qty in option_rows if premium != 0)
+    for row_type, strike, premium, qty in option_rows:
+        if row_type in ['خرید پوت', 'خرید کال']:
+            return strike + (total_premium / qty) if qty != 0 else purchase_price
+        elif row_type in ['فروش پوت', 'فروش کال']:
+            return strike - (total_premium / qty) if qty != 0 else purchase_price
+    return purchase_price + total_premium
+
+def calculate_profit_loss_percent(payoffs, purchase_price, investment):
+    return [(p / investment) * 100 for p in payoffs]
 
 def sharpe_ratio(returns, risk_free=0, ann_factor=12):
     excess_ret = returns - risk_free/ann_factor
@@ -494,101 +507,106 @@ with tabs[1]:
                     '-', 'Married Put', 'Protective Put', 'Covered Call', 'Collar',
                     'Bear Put Spread', 'Synthetic Put', 'Long Straddle/Strangle'
                 ], key=f"strategy_{name}")
+                current_price = resampled_prices[name].iloc[-1]
+                purchase_price = st.number_input(f"قیمت خرید دارایی پایه ({name})", value=current_price, key=f"purchase_price_{name}")
+                qty_asset = st.number_input(f"مقدار دارایی پایه ({name})", value=1.0, key=f"qty_asset_{name}")
                 if strategy != '-':
                     if strategy in ['Married Put', 'Protective Put']:
-                        current_price = resampled_prices[name].iloc[-1]
                         col1, col2, col3 = st.columns(3)
                         with col1:
-                            qty_asset = st.number_input(f"حجم خرید دارایی", value=1.0, key=f"qty_asset_{name}")
-                        with col2:
                             strike_put = st.number_input(f"قیمت اعمال پوت", value=current_price * 0.9, key=f"strike_put_{name}")
+                        with col2:
+                            premium_put = st.number_input(f"پریمیوم پوت (به ازای هر قرارداد)", value=0.0, key=f"premium_put_{name}")
                         with col3:
-                            premium_put = st.number_input(f"پریمیوم پوت", value=0.0, key=f"premium_put_{name}")
+                            qty_contract = st.number_input(f"مقدار قرارداد پوت", value=1.0, key=f"qty_contract_put_{name}")
                         opt_rows.append(('خرید دارایی', 0, 0, qty_asset))
-                        opt_rows.append(('خرید پوت', strike_put, premium_put, 1))
+                        opt_rows.append(('خرید پوت', strike_put, premium_put, qty_contract))
                     elif strategy == 'Covered Call':
-                        current_price = resampled_prices[name].iloc[-1]
                         col1, col2, col3 = st.columns(3)
                         with col1:
-                            qty_asset = st.number_input(f"حجم دارایی موجود", value=1.0, key=f"qty_asset_{name}")
-                        with col2:
                             strike_call = st.number_input(f"قیمت اعمال کال", value=current_price * 1.1, key=f"strike_call_{name}")
+                        with col2:
+                            premium_call = st.number_input(f"پریمیوم کال (به ازای هر قرارداد)", value=0.0, key=f"premium_call_{name}")
                         with col3:
-                            premium_call = st.number_input(f"پریمیوم کال", value=0.0, key=f"premium_call_{name}")
-                        opt_rows.append(('فروش کال', strike_call, premium_call, 1))
+                            qty_contract = st.number_input(f"مقدار قرارداد کال", value=1.0, key=f"qty_contract_call_{name}")
+                        opt_rows.append(('فروش کال', strike_call, premium_call, qty_contract))
                     elif strategy == 'Collar':
-                        current_price = resampled_prices[name].iloc[-1]
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
-                            qty_asset = st.number_input(f"حجم دارایی موجود", value=1.0, key=f"qty_asset_{name}")
-                        with col2:
                             strike_put = st.number_input(f"قیمت اعمال پوت", value=current_price * 0.9, key=f"strike_put_{name}")
+                        with col2:
+                            premium_put = st.number_input(f"پریمیوم پوت (به ازای هر قرارداد)", value=0.0, key=f"premium_put_{name}")
                         with col3:
-                            premium_put = st.number_input(f"پریمیوم پوت", value=0.0, key=f"premium_put_{name}")
-                        with col4:
                             strike_call = st.number_input(f"قیمت اعمال کال", value=current_price * 1.1, key=f"strike_call_{name}")
-                        premium_call = st.number_input(f"پریمیوم کال", value=0.0, key=f"premium_call_{name}")
-                        opt_rows.append(('خرید پوت', strike_put, premium_put, 1))
-                        opt_rows.append(('فروش کال', strike_call, premium_call, 1))
+                        with col4:
+                            premium_call = st.number_input(f"پریمیوم کال (به ازای هر قرارداد)", value=0.0, key=f"premium_call_{name}")
+                        qty_contract = st.number_input(f"مقدار قرارداد پوت/کال", value=1.0, key=f"qty_contract_collar_{name}")
+                        opt_rows.append(('خرید پوت', strike_put, premium_put, qty_contract))
+                        opt_rows.append(('فروش کال', strike_call, premium_call, qty_contract))
                     elif strategy == 'Bear Put Spread':
-                        current_price = resampled_prices[name].iloc[-1]
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
                             strike_put_high = st.number_input(f"قیمت اعمال پوت بالا", value=current_price, key=f"strike_put_high_{name}")
                         with col2:
-                            premium_put_high = st.number_input(f"پریمیوم پوت بالا", value=0.0, key=f"premium_put_high_{name}")
+                            premium_put_high = st.number_input(f"پریمیوم پوت بالا (به ازای هر قرارداد)", value=0.0, key=f"premium_put_high_{name}")
                         with col3:
                             strike_put_low = st.number_input(f"قیمت اعمال پوت پایین", value=current_price * 0.9, key=f"strike_put_low_{name}")
                         with col4:
-                            premium_put_low = st.number_input(f"پریمیوم پوت پایین", value=0.0, key=f"premium_put_low_{name}")
-                        opt_rows.append(('خرید پوت', strike_put_high, premium_put_high, 1))
-                        opt_rows.append(('فروش پوت', strike_put_low, premium_put_low, 1))
+                            premium_put_low = st.number_input(f"پریمیوم پوت پایین (به ازای هر قرارداد)", value=0.0, key=f"premium_put_low_{name}")
+                        qty_contract = st.number_input(f"مقدار قرارداد پوت", value=1.0, key=f"qty_contract_bear_{name}")
+                        opt_rows.append(('خرید پوت', strike_put_high, premium_put_high, qty_contract))
+                        opt_rows.append(('فروش پوت', strike_put_low, premium_put_low, qty_contract))
                     elif strategy == 'Synthetic Put':
-                        current_price = resampled_prices[name].iloc[-1]
                         col1, col2 = st.columns(2)
                         with col1:
                             strike_call = st.number_input(f"قیمت اعمال کال", value=current_price, key=f"strike_call_{name}")
                         with col2:
-                            premium_call = st.number_input(f"پریمیوم کال", value=0.0, key=f"premium_call_{name}")
-                        opt_rows.append(('فروش فیوچرز', 0, 0, 1))
-                        opt_rows.append(('خرید کال', strike_call, premium_call, 1))
+                            premium_call = st.number_input(f"پریمیوم کال (به ازای هر قرارداد)", value=0.0, key=f"premium_call_{name}")
+                        qty_contract = st.number_input(f"مقدار قرارداد کال", value=1.0, key=f"qty_contract_synth_{name}")
+                        opt_rows.append(('فروش فیوچرز', 0, 0, qty_asset))
+                        opt_rows.append(('خرید کال', strike_call, premium_call, qty_contract))
                     elif strategy == 'Long Straddle/Strangle':
-                        current_price = resampled_prices[name].iloc[-1]
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
                             strike_call = st.number_input(f"قیمت اعمال کال", value=current_price, key=f"strike_call_{name}")
                         with col2:
-                            premium_call = st.number_input(f"پریمیوم کال", value=0.0, key=f"premium_call_{name}")
+                            premium_call = st.number_input(f"پریمیوم کال (به ازای هر قرارداد)", value=0.0, key=f"premium_call_{name}")
                         with col3:
                             strike_put = st.number_input(f"قیمت اعمال پوت", value=current_price, key=f"strike_put_{name}")
                         with col4:
-                            premium_put = st.number_input(f"پریمیوم پوت", value=0.0, key=f"premium_put_{name}")
-                        opt_rows.append(('خرید کال', strike_call, premium_call, 1))
-                        opt_rows.append(('خرید پوت', strike_put, premium_put, 1))
+                            premium_put = st.number_input(f"پریمیوم پوت (به ازای هر قرارداد)", value=0.0, key=f"premium_put_{name}")
+                        qty_contract = st.number_input(f"مقدار قرارداد کال/پوت", value=1.0, key=f"qty_contract_straddle_{name}")
+                        opt_rows.append(('خرید کال', strike_call, premium_call, qty_contract))
+                        opt_rows.append(('خرید پوت', strike_put, premium_put, qty_contract))
                 option_rows_dict[name] = opt_rows
         st.session_state["option_rows"] = option_rows_dict.copy()
 
-        # نمایش Payoff Diagram
+        # نمایش Payoff Diagram و تحلیل
         st.markdown("### 📊 نمودار پرداخت (Payoff Diagram)")
         for name in asset_names:
             if option_rows_dict.get(name):
                 current_price = resampled_prices[name].iloc[-1]
+                purchase_price = st.session_state[f"purchase_price_{name}"]
+                qty_asset = st.session_state[f"qty_asset_{name}"]
+                investment = purchase_price * qty_asset
                 price_range = np.linspace(current_price * 0.5, current_price * 1.5, 100)
-                payoffs = calculate_payoff(option_rows_dict[name], current_price, price_range)
+                payoffs = calculate_payoff(option_rows_dict[name], current_price, purchase_price, price_range)
+                breakeven = calculate_breakeven(option_rows_dict[name], purchase_price)
+                profit_loss_percent = calculate_profit_loss_percent(payoffs, purchase_price, investment)
 
                 fig_payoff = go.Figure()
                 fig_payoff.add_trace(go.Scatter(
                     x=price_range,
                     y=payoffs,
                     mode='lines',
-                    fill='tozeroy',  # پر کردن زیر نمودار برای نمایش بهتر
-                    line=dict(color='green' if payoffs[0] >= 0 else 'red'),  # رنگ اولیه
+                    fill='tozeroy',
+                    line=dict(color='green' if payoffs[0] >= 0 else 'red'),
                     name=f'Payoff {name}',
-                    hovertemplate='قیمت: %{x:.2f}<br>سود/زیان: %{y:.2f}<extra></extra>'
+                    hovertemplate='قیمت: %{x:.2f}<br>سود/زیان: %{y:.2f}<br>درصد: %{text:.2f}%<extra></extra>',
+                    text=profit_loss_percent
                 ))
-                # رنگ‌بندی پویا برای سود (سبز) و زیان (قرمز)
                 for i in range(len(payoffs) - 1):
-                    if payoffs[i] * payoffs[i + 1] < 0:  # نقطه تغییر از سود به زیان یا برعکس
+                    if payoffs[i] * payoffs[i + 1] < 0:
                         fig_payoff.add_trace(go.Scatter(
                             x=[price_range[i], price_range[i + 1]],
                             y=[payoffs[i], payoffs[i + 1]],
@@ -599,10 +617,17 @@ with tabs[1]:
                             hoverinfo='skip'
                         ))
                 fig_payoff.add_trace(go.Scatter(
-                    x=[current_price, current_price],
+                    x=[breakeven, breakeven],
                     y=[min(payoffs), max(payoffs)],
                     mode='lines',
                     line=dict(color='blue', dash='dash'),
+                    name='نقطه سربه‌سر'
+                ))
+                fig_payoff.add_trace(go.Scatter(
+                    x=[current_price, current_price],
+                    y=[min(payoffs), max(payoffs)],
+                    mode='lines',
+                    line=dict(color='gray', dash='dash'),
                     name='قیمت فعلی'
                 ))
                 fig_payoff.update_layout(
@@ -613,6 +638,13 @@ with tabs[1]:
                     showlegend=True
                 )
                 st.plotly_chart(fig_payoff, use_container_width=True)
+
+                st.markdown(f"### 📋 تحلیل استراتژی برای {name}")
+                st.markdown(f"**نقطه سربه‌سر**: {breakeven:.2f} دلار")
+                max_profit = max(payoffs)
+                max_loss = min(payoffs)
+                st.markdown(f"**حداکثر سود**: {format_money(max_profit)} ({format_percent(max_profit / investment)})")
+                st.markdown(f"**حداکثر زیان**: {format_money(max_loss)} ({format_percent(max_loss / investment)})")
 
         if st.button("🔄 به‌روزرسانی"):
             st.rerun()
