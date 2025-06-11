@@ -192,6 +192,29 @@ def calc_options_series(option_rows, prices: pd.Series):
         prev_price = price
     return rets
 
+def calculate_payoff(option_rows, current_price, price_range):
+    payoffs = []
+    for price in price_range:
+        total_payoff = 0
+        prev_price = current_price  # برای محاسبه نسبت به قیمت فعلی
+        for row_type, strike, premium, qty in option_rows:
+            if row_type == 'خرید دارایی':
+                total_payoff += qty * (price - prev_price)
+            elif row_type == 'فروش دارایی':
+                total_payoff += qty * (prev_price - price)
+            elif row_type == 'خرید کال':
+                total_payoff += qty * (max(price - strike, 0) - premium)
+            elif row_type == 'فروش کال':
+                total_payoff += qty * (premium - max(price - strike, 0))
+            elif row_type == 'خرید پوت':
+                total_payoff += qty * (max(strike - price, 0) - premium)
+            elif row_type == 'فروش پوت':
+                total_payoff += qty * (premium - max(strike - price, 0))
+            elif row_type == 'فروش فیوچرز':
+                total_payoff += qty * (prev_price - price)
+        payoffs.append(total_payoff)
+    return payoffs
+
 def sharpe_ratio(returns, risk_free=0, ann_factor=12):
     excess_ret = returns - risk_free/ann_factor
     mean = np.mean(excess_ret)
@@ -546,8 +569,64 @@ with tabs[1]:
                 option_rows_dict[name] = opt_rows
         st.session_state["option_rows"] = option_rows_dict.copy()
 
+        # نمایش نمودار PnL
+        st.markdown("### 📈 نمودار سود و زیان (PnL) معاملات اپشن")
+        for name in asset_names:
+            if option_rows_dict.get(name):
+                price_series = resampled_prices[name]
+                returns = calc_options_series(option_rows_dict[name], price_series)
+                cumulative_pnl = (1 + returns).cumprod() - 1  # محاسبه سود و زیان تجمعی
+
+                fig_pnl = go.Figure()
+                fig_pnl.add_trace(go.Scatter(
+                    x=price_series.index,
+                    y=cumulative_pnl,
+                    mode='lines',
+                    name=f'PnL {name}',
+                    line=dict(color='#4CAF50')
+                ))
+                fig_pnl.update_layout(
+                    title=f"سود و زیان تجمعی برای {name}",
+                    xaxis_title="تاریخ",
+                    yaxis_title="سود و زیان (نسبی)",
+                    template="plotly_white"
+                )
+                st.plotly_chart(fig_pnl, use_container_width=True)
+
+        # نمایش Payoff Diagram
+        st.markdown("### 📊 نمودار پرداخت (Payoff Diagram)")
+        for name in asset_names:
+            if option_rows_dict.get(name):
+                current_price = resampled_prices[name].iloc[-1]
+                price_range = np.linspace(current_price * 0.5, current_price * 1.5, 100)
+                payoffs = calculate_payoff(option_rows_dict[name], current_price, price_range)
+
+                fig_payoff = go.Figure()
+                fig_payoff.add_trace(go.Scatter(
+                    x=price_range,
+                    y=payoffs,
+                    mode='lines',
+                    name=f'Payoff {name}',
+                    line=dict(color='#FF9800')
+                ))
+                fig_payoff.add_trace(go.Scatter(
+                    x=[current_price, current_price],
+                    y=[min(payoffs), max(payoffs)],
+                    mode='lines',
+                    name='قیمت فعلی',
+                    line=dict(color='red', dash='dash')
+                ))
+                fig_payoff.update_layout(
+                    title=f"نمودار پرداخت برای {name}",
+                    xaxis_title="قیمت دارایی",
+                    yaxis_title="سود و زیان (دلار)",
+                    template="plotly_white",
+                    showlegend=True
+                )
+                st.plotly_chart(fig_payoff, use_container_width=True)
+
         if st.button("🔄 به‌روزرسانی"):
-            st.rerun()  # تغییر از experimental_rerun به rerun
+            st.rerun()
 
 with tabs[2]:
     if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
