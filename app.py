@@ -196,22 +196,21 @@ def calculate_payoff(option_rows, current_price, price_range):
     payoffs = []
     for price in price_range:
         total_payoff = 0
-        prev_price = current_price  # برای محاسبه نسبت به قیمت فعلی
         for row_type, strike, premium, qty in option_rows:
             if row_type == 'خرید دارایی':
-                total_payoff += qty * (price - prev_price)
+                total_payoff += qty * (price - current_price)
             elif row_type == 'فروش دارایی':
-                total_payoff += qty * (prev_price - price)
+                total_payoff += qty * (current_price - price)
             elif row_type == 'خرید کال':
-                total_payoff += qty * (max(price - strike, 0) - premium)
+                total_payoff += qty * (max(price - strike, 0) - premium * current_price)
             elif row_type == 'فروش کال':
-                total_payoff += qty * (premium - max(price - strike, 0))
+                total_payoff += qty * (premium * current_price - max(price - strike, 0))
             elif row_type == 'خرید پوت':
-                total_payoff += qty * (max(strike - price, 0) - premium)
+                total_payoff += qty * (max(strike - price, 0) - premium * current_price)
             elif row_type == 'فروش پوت':
-                total_payoff += qty * (premium - max(strike - price, 0))
+                total_payoff += qty * (premium * current_price - max(strike - price, 0))
             elif row_type == 'فروش فیوچرز':
-                total_payoff += qty * (prev_price - price)
+                total_payoff += qty * (current_price - price)
         payoffs.append(total_payoff)
     return payoffs
 
@@ -569,30 +568,6 @@ with tabs[1]:
                 option_rows_dict[name] = opt_rows
         st.session_state["option_rows"] = option_rows_dict.copy()
 
-        # نمایش نمودار PnL
-        st.markdown("### 📈 نمودار سود و زیان (PnL) معاملات اپشن")
-        for name in asset_names:
-            if option_rows_dict.get(name):
-                price_series = resampled_prices[name]
-                returns = calc_options_series(option_rows_dict[name], price_series)
-                cumulative_pnl = (1 + returns).cumprod() - 1  # محاسبه سود و زیان تجمعی
-
-                fig_pnl = go.Figure()
-                fig_pnl.add_trace(go.Scatter(
-                    x=price_series.index,
-                    y=cumulative_pnl,
-                    mode='lines',
-                    name=f'PnL {name}',
-                    line=dict(color='#4CAF50')
-                ))
-                fig_pnl.update_layout(
-                    title=f"سود و زیان تجمعی برای {name}",
-                    xaxis_title="تاریخ",
-                    yaxis_title="سود و زیان (نسبی)",
-                    template="plotly_white"
-                )
-                st.plotly_chart(fig_pnl, use_container_width=True)
-
         # نمایش Payoff Diagram
         st.markdown("### 📊 نمودار پرداخت (Payoff Diagram)")
         for name in asset_names:
@@ -606,15 +581,29 @@ with tabs[1]:
                     x=price_range,
                     y=payoffs,
                     mode='lines',
+                    fill='tozeroy',  # پر کردن زیر نمودار برای نمایش بهتر
+                    line=dict(color='green' if payoffs[0] >= 0 else 'red'),  # رنگ اولیه
                     name=f'Payoff {name}',
-                    line=dict(color='#FF9800')
+                    hovertemplate='قیمت: %{x:.2f}<br>سود/زیان: %{y:.2f}<extra></extra>'
                 ))
+                # رنگ‌بندی پویا برای سود (سبز) و زیان (قرمز)
+                for i in range(len(payoffs) - 1):
+                    if payoffs[i] * payoffs[i + 1] < 0:  # نقطه تغییر از سود به زیان یا برعکس
+                        fig_payoff.add_trace(go.Scatter(
+                            x=[price_range[i], price_range[i + 1]],
+                            y=[payoffs[i], payoffs[i + 1]],
+                            mode='lines',
+                            fill='tonexty',
+                            line=dict(color='green' if payoffs[i + 1] >= 0 else 'red'),
+                            showlegend=False,
+                            hoverinfo='skip'
+                        ))
                 fig_payoff.add_trace(go.Scatter(
                     x=[current_price, current_price],
                     y=[min(payoffs), max(payoffs)],
                     mode='lines',
-                    name='قیمت فعلی',
-                    line=dict(color='red', dash='dash')
+                    line=dict(color='blue', dash='dash'),
+                    name='قیمت فعلی'
                 ))
                 fig_payoff.update_layout(
                     title=f"نمودار پرداخت برای {name}",
