@@ -334,10 +334,10 @@ resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'هفتگی': 'W'}
 annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'هفتگی': 52}[period]
 
 st.sidebar.markdown("---")
-user_rf = st.sidebar.number_input("نرخ بدون ریسک سالانه (%)", min_value=0.0, max_value=100.0, value=3.0, step=0.1) / 100
+user_rf = st.number_input("نرخ بدون ریسک سالانه (%)", value=3.0, key="user_rf")
 
 st.sidebar.markdown("---")
-investment_amount = st.sidebar.number_input("💵 سرمایه کل (دلار)", min_value=0.0, value=float(st.session_state["investment_amount"]), step=100.0)
+investment_amount = st.number_input("💵 سرمایه کل (دلار)", value=float(st.session_state["investment_amount"]), key="investment_amount")
 st.session_state["investment_amount"] = investment_amount
 
 # ---------- Minimum and Maximum Weight Constraints ----------
@@ -356,8 +356,8 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     cols = st.sidebar.columns(2)
     for i, name in enumerate(asset_names):
         with cols[i%2]:
-            min_w = st.number_input(f"حداقل وزن {name}", min_value=0.0, max_value=1.0, value=0.0, step=0.01, key=f"minw_{name}")
-            max_w = st.number_input(f"حداکثر وزن {name}", min_value=0.0, max_value=1.0, value=1.0, step=0.01, key=f"maxw_{name}")
+            min_w = st.number_input(f"حداقل وزن {name}", value=0.0, key=f"minw_{name}")
+            max_w = st.number_input(f"حداکثر وزن {name}", value=1.0, key=f"maxw_{name}")
             min_weights.append(min_w)
             max_weights.append(max_w)
     min_weights = np.array(min_weights)
@@ -412,46 +412,46 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             if strategy != '-':
                 if strategy in ['Married Put', 'Protective Put']:
                     current_price = resampled_prices[name].iloc[-1]
-                    qty_asset = st.number_input(f"حجم خرید دارایی ({name})", min_value=0, value=1, key=f"qty_asset_{name}")
+                    qty_asset = st.number_input(f"حجم خرید دارایی ({name})", value=1.0, key=f"qty_asset_{name}")
                     strike_put = st.number_input(f"قیمت اعمال پوت ({name})", value=current_price * 0.9, key=f"strike_put_{name}")
-                    premium_put = st.number_input(f"پریمیوم پوت ({name})", value=strike_put * 0.05, key=f"premium_put_{name}")
+                    premium_put = st.number_input(f"پریمیوم پوت ({name})", value=0.0, key=f"premium_put_{name}")
                     opt_rows.append(('خرید دارایی', 0, 0, qty_asset))  # خرید دارایی بدون strike و premium
                     opt_rows.append(('خرید پوت', strike_put, premium_put, 1))
                 elif strategy == 'Covered Call':
                     current_price = resampled_prices[name].iloc[-1]
-                    qty_asset = st.number_input(f"حجم دارایی موجود ({name})", min_value=0, value=1, key=f"qty_asset_{name}")
+                    qty_asset = st.number_input(f"حجم دارایی موجود ({name})", value=1.0, key=f"qty_asset_{name}")
                     strike_call = st.number_input(f"قیمت اعمال کال ({name})", value=current_price * 1.1, key=f"strike_call_{name}")
-                    premium_call = st.number_input(f"پریمیوم کال ({name})", value=strike_call * 0.05, key=f"premium_call_{name}")
+                    premium_call = st.number_input(f"پریمیوم کال ({name})", value=0.0, key=f"premium_call_{name}")
                     opt_rows.append(('فروش کال', strike_call, premium_call, 1))
                 elif strategy == 'Collar':
                     current_price = resampled_prices[name].iloc[-1]
-                    qty_asset = st.number_input(f"حجم دارایی موجود ({name})", min_value=0, value=1, key=f"qty_asset_{name}")
+                    qty_asset = st.number_input(f"حجم دارایی موجود ({name})", value=1.0, key=f"qty_asset_{name}")
                     strike_put = st.number_input(f"قیمت اعمال پوت ({name})", value=current_price * 0.9, key=f"strike_put_{name}")
-                    premium_put = st.number_input(f"پریمیوم پوت ({name})", value=strike_put * 0.05, key=f"premium_put_{name}")
+                    premium_put = st.number_input(f"پریمیوم پوت ({name})", value=0.0, key=f"premium_put_{name}")
                     strike_call = st.number_input(f"قیمت اعمال کال ({name})", value=current_price * 1.1, key=f"strike_call_{name}")
-                    premium_call = st.number_input(f"پریمیوم کال ({name})", value=strike_call * 0.05, key=f"premium_call_{name}")
+                    premium_call = st.number_input(f"پریمیوم کال ({name})", value=0.0, key=f"premium_call_{name}")
                     opt_rows.append(('خرید پوت', strike_put, premium_put, 1))
                     opt_rows.append(('فروش کال', strike_call, premium_call, 1))
                 elif strategy == 'Bear Put Spread':
                     current_price = resampled_prices[name].iloc[-1]
                     strike_put_high = st.number_input(f"قیمت اعمال پوت بالا ({name})", value=current_price, key=f"strike_put_high_{name}")
-                    premium_put_high = st.number_input(f"پریمیوم پوت بالا ({name})", value=current_price * 0.05, key=f"premium_put_high_{name}")
+                    premium_put_high = st.number_input(f"پریمیوم پوت بالا ({name})", value=0.0, key=f"premium_put_high_{name}")
                     strike_put_low = st.number_input(f"قیمت اعمال پوت پایین ({name})", value=current_price * 0.9, key=f"strike_put_low_{name}")
-                    premium_put_low = st.number_input(f"پریمیوم پوت پایین ({name})", value=current_price * 0.03, key=f"premium_put_low_{name}")
+                    premium_put_low = st.number_input(f"پریمیوم پوت پایین ({name})", value=0.0, key=f"premium_put_low_{name}")
                     opt_rows.append(('خرید پوت', strike_put_high, premium_put_high, 1))
                     opt_rows.append(('فروش پوت', strike_put_low, premium_put_low, 1))
                 elif strategy == 'Synthetic Put':
                     current_price = resampled_prices[name].iloc[-1]
                     strike_call = st.number_input(f"قیمت اعمال کال ({name})", value=current_price, key=f"strike_call_{name}")
-                    premium_call = st.number_input(f"پریمیوم کال ({name})", value=current_price * 0.05, key=f"premium_call_{name}")
+                    premium_call = st.number_input(f"پریمیوم کال ({name})", value=0.0, key=f"premium_call_{name}")
                     opt_rows.append(('فروش فیوچرز', 0, 0, 1))  # شبیه‌سازی ساده
                     opt_rows.append(('خرید کال', strike_call, premium_call, 1))
                 elif strategy == 'Long Straddle/Strangle':
                     current_price = resampled_prices[name].iloc[-1]
                     strike_call = st.number_input(f"قیمت اعمال کال ({name})", value=current_price, key=f"strike_call_{name}")
-                    premium_call = st.number_input(f"پریمیوم کال ({name})", value=current_price * 0.05, key=f"premium_call_{name}")
+                    premium_call = st.number_input(f"پریمیوم کال ({name})", value=0.0, key=f"premium_call_{name}")
                     strike_put = st.number_input(f"قیمت اعمال پوت ({name})", value=current_price, key=f"strike_put_{name}")
-                    premium_put = st.number_input(f"پریمیوم پوت ({name})", value=current_price * 0.05, key=f"premium_put_{name}")
+                    premium_put = st.number_input(f"پریمیوم پوت ({name})", value=0.0, key=f"premium_put_{name}")
                     opt_rows.append(('خرید کال', strike_call, premium_call, 1))
                     opt_rows.append(('خرید پوت', strike_put, premium_put, 1))
             option_rows_dict[name] = opt_rows
