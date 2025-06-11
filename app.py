@@ -224,8 +224,9 @@ def calculate_breakeven(option_rows, purchase_price):
             return strike - (total_premium / qty) if qty != 0 else purchase_price
     return purchase_price + total_premium
 
-def calculate_profit_loss_percent(payoffs, purchase_price, investment):
-    return [(p / investment) * 100 for p in payoffs]
+def calculate_profit_loss_percent(payoffs, purchase_price, qty_asset):
+    investment = purchase_price * qty_asset
+    return [(p / investment) * 100 if investment != 0 else 0 for p in payoffs]
 
 def sharpe_ratio(returns, risk_free=0, ann_factor=12):
     excess_ret = returns - risk_free/ann_factor
@@ -581,8 +582,8 @@ with tabs[1]:
                 option_rows_dict[name] = opt_rows
         st.session_state["option_rows"] = option_rows_dict.copy()
 
-        # نمایش Payoff Diagram و تحلیل
-        st.markdown("### 📊 نمودار پرداخت (Payoff Diagram)")
+        # نمایش نمودار سود و زیان و تحلیل
+        st.markdown("### 📊 نمودار سود و زیان")
         for name in asset_names:
             if option_rows_dict.get(name):
                 current_price = resampled_prices[name].iloc[-1]
@@ -592,21 +593,23 @@ with tabs[1]:
                 price_range = np.linspace(current_price * 0.5, current_price * 1.5, 100)
                 payoffs = calculate_payoff(option_rows_dict[name], current_price, purchase_price, price_range)
                 breakeven = calculate_breakeven(option_rows_dict[name], purchase_price)
-                profit_loss_percent = calculate_profit_loss_percent(payoffs, purchase_price, investment)
+                profit_loss_percent = calculate_profit_loss_percent(payoffs, purchase_price, qty_asset)
 
                 fig_payoff = go.Figure()
+                # تنظیم رنگ‌بندی پویا بر اساس سود (سبز) و زیان (قرمز)
                 fig_payoff.add_trace(go.Scatter(
                     x=price_range,
                     y=payoffs,
                     mode='lines',
                     fill='tozeroy',
-                    line=dict(color='green' if payoffs[0] >= 0 else 'red'),
-                    name=f'Payoff {name}',
+                    line=dict(color='green' if payoffs[-1] >= 0 else 'red'),  # رنگ اولیه بر اساس آخرین نقطه
+                    name=f'سود و زیان {name}',
                     hovertemplate='قیمت: %{x:.2f}<br>سود/زیان: %{y:.2f}<br>درصد: %{text:.2f}%<extra></extra>',
                     text=profit_loss_percent
                 ))
+                # تغییر رنگ در نقاط صفر (سود به زیان یا برعکس)
                 for i in range(len(payoffs) - 1):
-                    if payoffs[i] * payoffs[i + 1] < 0:
+                    if payoffs[i] * payoffs[i + 1] < 0:  # نقطه تغییر
                         fig_payoff.add_trace(go.Scatter(
                             x=[price_range[i], price_range[i + 1]],
                             y=[payoffs[i], payoffs[i + 1]],
@@ -631,7 +634,7 @@ with tabs[1]:
                     name='قیمت فعلی'
                 ))
                 fig_payoff.update_layout(
-                    title=f"نمودار پرداخت برای {name}",
+                    title=f"نمودار سود و زیان برای {name}",
                     xaxis_title="قیمت دارایی",
                     yaxis_title="سود و زیان (دلار)",
                     template="plotly_white",
