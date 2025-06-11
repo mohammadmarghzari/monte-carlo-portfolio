@@ -119,6 +119,8 @@ def calc_option_return(row_type, price, prev_price, strike, premium, qty):
         return (max(strike - price, 0) - premium) / prev_price if prev_price != 0 else 0
     elif row_type == 'فروش پوت':
         return (premium - max(strike - price, 0)) / prev_price if prev_price != 0 else 0
+    elif row_type == 'فروش فیوچرز':
+        return (prev_price - price) / prev_price if prev_price != 0 else 0  # شبیه‌سازی ساده
     else:
         return 0
 
@@ -397,25 +399,61 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
     st.write(stats_df)
 
     # 3- Options and Hedging Configuration
-    st.markdown("## ⚙️ تنظیمات معاملات آپشن و بیمه")
-    st.markdown("برای هر دارایی می‌توانید استراتژی معاملات (مثل خرید دارایی پایه، خرید/فروش کال/پوت) را به صورت دستی تعریف کنید.")
+    st.markdown("## ⚙️ تنظیمات معاملات آپشن و استراتژی‌ها")
+    st.markdown("برای هر دارایی می‌توانید یک استراتژی معامله (مثل Married Put، Protective Put، Covered Call و ...) را به صورت دستی تعریف کنید.")
     option_rows_dict = {}
     for name in asset_names:
         with st.expander(f"⚙️ معاملات {name}", expanded=True):
             opt_rows = []
-            for i in range(3):
-                c1, c2, c3, c4 = st.columns([2,2,2,2])
-                with c1:
-                    row_type = st.selectbox("نوع معامله", ['-', 'خرید دارایی', 'فروش دارایی', 'خرید کال', 'فروش کال', 'خرید پوت', 'فروش پوت'],
-                                            key=f"opttype_{name}_{i}")
-                with c2:
-                    strike = st.number_input("قیمت اعمال (در صورت نیاز)", key=f"strike_{name}_{i}")
-                with c3:
-                    premium = st.number_input("پریمیوم ($)", key=f"premium_{name}_{i}")
-                with c4:
-                    qty = st.number_input("حجم قرارداد/دارایی", key=f"qty_{name}_{i}")
-                if row_type != '-' and qty != 0:
-                    opt_rows.append((row_type, strike, premium, qty))
+            strategy = st.selectbox("استراتژی انتخابی", [
+                '-', 'Married Put', 'Protective Put', 'Covered Call', 'Collar',
+                'Bear Put Spread', 'Synthetic Put', 'Long Straddle/Strangle'
+            ], key=f"strategy_{name}")
+            if strategy != '-':
+                if strategy in ['Married Put', 'Protective Put']:
+                    current_price = resampled_prices[name].iloc[-1]
+                    qty_asset = st.number_input(f"حجم خرید دارایی ({name})", min_value=0, value=1, key=f"qty_asset_{name}")
+                    strike_put = st.number_input(f"قیمت اعمال پوت ({name})", value=current_price * 0.9, key=f"strike_put_{name}")
+                    premium_put = st.number_input(f"پریمیوم پوت ({name})", value=strike_put * 0.05, key=f"premium_put_{name}")
+                    opt_rows.append(('خرید دارایی', 0, 0, qty_asset))  # خرید دارایی بدون strike و premium
+                    opt_rows.append(('خرید پوت', strike_put, premium_put, 1))
+                elif strategy == 'Covered Call':
+                    current_price = resampled_prices[name].iloc[-1]
+                    qty_asset = st.number_input(f"حجم دارایی موجود ({name})", min_value=0, value=1, key=f"qty_asset_{name}")
+                    strike_call = st.number_input(f"قیمت اعمال کال ({name})", value=current_price * 1.1, key=f"strike_call_{name}")
+                    premium_call = st.number_input(f"پریمیوم کال ({name})", value=strike_call * 0.05, key=f"premium_call_{name}")
+                    opt_rows.append(('فروش کال', strike_call, premium_call, 1))
+                elif strategy == 'Collar':
+                    current_price = resampled_prices[name].iloc[-1]
+                    qty_asset = st.number_input(f"حجم دارایی موجود ({name})", min_value=0, value=1, key=f"qty_asset_{name}")
+                    strike_put = st.number_input(f"قیمت اعمال پوت ({name})", value=current_price * 0.9, key=f"strike_put_{name}")
+                    premium_put = st.number_input(f"پریمیوم پوت ({name})", value=strike_put * 0.05, key=f"premium_put_{name}")
+                    strike_call = st.number_input(f"قیمت اعمال کال ({name})", value=current_price * 1.1, key=f"strike_call_{name}")
+                    premium_call = st.number_input(f"پریمیوم کال ({name})", value=strike_call * 0.05, key=f"premium_call_{name}")
+                    opt_rows.append(('خرید پوت', strike_put, premium_put, 1))
+                    opt_rows.append(('فروش کال', strike_call, premium_call, 1))
+                elif strategy == 'Bear Put Spread':
+                    current_price = resampled_prices[name].iloc[-1]
+                    strike_put_high = st.number_input(f"قیمت اعمال پوت بالا ({name})", value=current_price, key=f"strike_put_high_{name}")
+                    premium_put_high = st.number_input(f"پریمیوم پوت بالا ({name})", value=current_price * 0.05, key=f"premium_put_high_{name}")
+                    strike_put_low = st.number_input(f"قیمت اعمال پوت پایین ({name})", value=current_price * 0.9, key=f"strike_put_low_{name}")
+                    premium_put_low = st.number_input(f"پریمیوم پوت پایین ({name})", value=current_price * 0.03, key=f"premium_put_low_{name}")
+                    opt_rows.append(('خرید پوت', strike_put_high, premium_put_high, 1))
+                    opt_rows.append(('فروش پوت', strike_put_low, premium_put_low, 1))
+                elif strategy == 'Synthetic Put':
+                    current_price = resampled_prices[name].iloc[-1]
+                    strike_call = st.number_input(f"قیمت اعمال کال ({name})", value=current_price, key=f"strike_call_{name}")
+                    premium_call = st.number_input(f"پریمیوم کال ({name})", value=current_price * 0.05, key=f"premium_call_{name}")
+                    opt_rows.append(('فروش فیوچرز', 0, 0, 1))  # شبیه‌سازی ساده
+                    opt_rows.append(('خرید کال', strike_call, premium_call, 1))
+                elif strategy == 'Long Straddle/Strangle':
+                    current_price = resampled_prices[name].iloc[-1]
+                    strike_call = st.number_input(f"قیمت اعمال کال ({name})", value=current_price, key=f"strike_call_{name}")
+                    premium_call = st.number_input(f"پریمیوم کال ({name})", value=current_price * 0.05, key=f"premium_call_{name}")
+                    strike_put = st.number_input(f"قیمت اعمال پوت ({name})", value=current_price, key=f"strike_put_{name}")
+                    premium_put = st.number_input(f"پریمیوم پوت ({name})", value=current_price * 0.05, key=f"premium_put_{name}")
+                    opt_rows.append(('خرید کال', strike_call, premium_call, 1))
+                    opt_rows.append(('خرید پوت', strike_put, premium_put, 1))
             option_rows_dict[name] = opt_rows
     st.session_state["option_rows"] = option_rows_dict.copy()
 
@@ -574,6 +612,8 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
                         pnl = np.maximum(strike - price_range, 0) * qty - premium * qty
                     elif row_type == 'فروش پوت':
                         pnl = -np.maximum(strike - price_range, 0) * qty + premium * qty
+                    elif row_type == 'فروش فیوچرز':
+                        pnl = (asset_price - price_range) * qty  # شبیه‌سازی ساده
                     return pnl
                 for row in opt_rows:
                     total_pnl += calculate_pnl(*row, price_range, asset_price)
