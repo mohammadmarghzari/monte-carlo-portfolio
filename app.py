@@ -407,8 +407,8 @@ if st.session_state["downloaded_dfs"] or st.session_state["uploaded_dfs"]:
             opt_rows = []
             if hedge:
                 current_price = resampled_prices[name].iloc[-1]
-                strike = current_price * 0.9  # 90% of current price
-                premium = strike * 0.05  # 5% of strike as premium
+                strike = st.number_input(f"قیمت اعمال پوت محافظتی ({name})", value=current_price * 0.9, key=f"strike_hedge_{name}")
+                premium = st.number_input(f"پریمیوم پوت محافظتی ({name})", value=strike * 0.05, key=f"premium_hedge_{name}")
                 opt_rows.append(('خرید پوت', strike, premium, 1))
                 st.info(f"بیمه فعال: خرید پوت با قیمت اعمال {format_money(strike)} و پریمیوم {format_money(premium)}")
             for i in range(3):
